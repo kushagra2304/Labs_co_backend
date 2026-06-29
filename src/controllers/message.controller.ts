@@ -1,0 +1,91 @@
+import { Request, Response } from 'express';
+import { MessageService } from '../services/message.service';
+
+export class MessageController {
+  constructor(private messageService = new MessageService()) {}
+
+  editMessage = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const messageId = req.params.messageId as string;
+      const { content } = req.body;
+
+      if (!content || content.trim() === '') {
+        res.status(400).json({ success: false, error: 'Content is required to edit message' });
+        return;
+      }
+
+      const message = await this.messageService.editMessage(messageId, userId, content);
+      res.status(200).json({
+        success: true,
+        data: message,
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        error: error.message || 'Failed to edit message',
+      });
+    }
+  };
+
+  deleteMessage = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const messageId = req.params.messageId as string;
+
+      const message = await this.messageService.deleteMessage(messageId, userId);
+      res.status(200).json({
+        success: true,
+        data: message,
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        error: error.message || 'Failed to delete message',
+      });
+    }
+  };
+
+  addReaction = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const messageId = req.params.messageId as string;
+      const { emoji } = req.body;
+
+      if (!emoji) {
+        res.status(400).json({ success: false, error: 'Emoji is required to react' });
+        return;
+      }
+
+      const reaction = await this.messageService.addReaction(messageId, userId, emoji);
+      res.status(200).json({
+        success: true,
+        data: reaction,
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        error: error.message || 'Failed to add reaction',
+      });
+    }
+  };
+
+  deleteReaction = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const messageId = req.params.messageId as string;
+      const reactionId = req.params.reactionId as string;
+
+      const reaction = await this.messageService.deleteReaction(messageId, reactionId, userId);
+      res.status(200).json({
+        success: true,
+        data: reaction,
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        error: error.message || 'Failed to delete reaction',
+      });
+    }
+  };
+}
