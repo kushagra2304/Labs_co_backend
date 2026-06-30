@@ -23,6 +23,7 @@ router.use(requireAuth);
 
 // Employee list
 router.get('/employees', userController.getEmployees);
+router.get('/users', userController.getChatUsers);
 
 // Conversations
 router.get('/conversations', conversationController.getMyConversations);

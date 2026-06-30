@@ -27,6 +27,17 @@ export class UserRepository {
     });
   }
 
+  async findActiveEmployeesExcept(currentUserId: string): Promise<User[]> {
+    return prisma.user.findMany({
+      where: {
+        id: { not: currentUserId },
+        isActive: true,
+        deletedAt: null,
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
   async create(data: Omit<Prisma.UserCreateInput, 'createdAt' | 'updatedAt' | 'deletedAt'>, actorId?: string): Promise<User> {
     return prisma.user.create({
       data: {

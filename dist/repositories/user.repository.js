@@ -28,6 +28,16 @@ class UserRepository {
             orderBy: { name: 'asc' },
         });
     }
+    async findActiveEmployeesExcept(currentUserId) {
+        return prisma_config_1.default.user.findMany({
+            where: {
+                id: { not: currentUserId },
+                isActive: true,
+                deletedAt: null,
+            },
+            orderBy: { name: 'asc' },
+        });
+    }
     async create(data, actorId) {
         return prisma_config_1.default.user.create({
             data: {
