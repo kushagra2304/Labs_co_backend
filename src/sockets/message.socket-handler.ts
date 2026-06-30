@@ -1,5 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { MessageService } from '../services/message.service';
+import prisma from '../config/prisma.config';
 
 export const handleMessageEvents = (io: Server, socket: Socket, messageService: MessageService) => {
   const userId = socket.data.user.id;
@@ -27,10 +28,27 @@ export const handleMessageEvents = (io: Server, socket: Socket, messageService: 
         })),
       };
 
+      // Emit to conversation room (for active chat screen)
       io.to(conversationId).emit('new_message', {
         message: serializedMessage,
         conversationId,
+        tempId,
       });
+
+      // Get all members of this conversation
+      const members = await prisma.conversationMember.findMany({
+        where: { conversationId, deletedAt: null },
+        select: { userId: true },
+      });
+
+      // Emit to each member's personal room for real-time notifications/unreads
+      for (const member of members) {
+        io.to(member.userId).emit('new_message', {
+          message: serializedMessage,
+          conversationId,
+          tempId,
+        });
+      }
 
       socket.emit('message_ack', {
         tempId,

@@ -5,32 +5,33 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.socketAuthMiddleware = void 0;
 const prisma_config_1 = __importDefault(require("../config/prisma.config"));
-const require_auth_middleware_1 = require("./require-auth.middleware");
+const jwt_util_1 = require("../utils/jwt.util");
 const socketAuthMiddleware = async (socket, next) => {
     try {
-        const userId = socket.handshake.auth.userId ||
-            socket.handshake.query.userId ||
-            require_auth_middleware_1.MOCK_USER_ID;
-        let user = await prisma_config_1.default.user.findUnique({
-            where: { id: userId },
+        const token = socket.handshake.auth.token ||
+            socket.handshake.query.token;
+        if (!token) {
+            next(new Error('Authentication error: No token provided'));
+            return;
+        }
+        let decoded;
+        try {
+            decoded = (0, jwt_util_1.verifyToken)(token);
+        }
+        catch (err) {
+            next(new Error('Authentication error: Invalid or expired token'));
+            return;
+        }
+        const user = await prisma_config_1.default.user.findUnique({
+            where: { id: decoded.userId },
         });
         if (!user) {
-            if (userId === require_auth_middleware_1.MOCK_USER_ID) {
-                user = await prisma_config_1.default.user.create({
-                    data: {
-                        id: require_auth_middleware_1.MOCK_USER_ID,
-                        name: 'Mock User',
-                        email: 'mockuser@example.com',
-                        role: 'employee',
-                        isActive: true,
-                        lastSeen: new Date(),
-                    },
-                });
-            }
-            else {
-                next(new Error('Authentication error: User not found'));
-                return;
-            }
+            next(new Error('Authentication error: User not found'));
+            return;
+        }
+        if (!user.isActive) {
+            next(new Error('Authentication error: Account is deactivated'));
+            return;
         }
         socket.data.user = {
             id: user.id,

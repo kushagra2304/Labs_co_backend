@@ -3,32 +3,35 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.requireRole = exports.requireAuth = exports.MOCK_USER_ID = void 0;
+exports.requireRole = exports.requireAuth = void 0;
 const prisma_config_1 = __importDefault(require("../config/prisma.config"));
-exports.MOCK_USER_ID = '11111111-1111-1111-1111-111111111111';
+const jwt_util_1 = require("../utils/jwt.util");
 const requireAuth = async (req, res, next) => {
     try {
-        const userId = req.headers['x-user-id'] || exports.MOCK_USER_ID;
-        let user = await prisma_config_1.default.user.findUnique({
-            where: { id: userId },
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            res.status(401).json({ success: false, error: 'Unauthorized: No token provided' });
+            return;
+        }
+        const token = authHeader.split(' ')[1];
+        let decoded;
+        try {
+            decoded = (0, jwt_util_1.verifyToken)(token);
+        }
+        catch (err) {
+            res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired token' });
+            return;
+        }
+        const user = await prisma_config_1.default.user.findUnique({
+            where: { id: decoded.userId },
         });
         if (!user) {
-            if (userId === exports.MOCK_USER_ID) {
-                user = await prisma_config_1.default.user.create({
-                    data: {
-                        id: exports.MOCK_USER_ID,
-                        name: 'Mock User',
-                        email: 'mockuser@example.com',
-                        role: 'employee',
-                        isActive: true,
-                        lastSeen: new Date(),
-                    },
-                });
-            }
-            else {
-                res.status(401).json({ success: false, error: 'Unauthorized: User not found' });
-                return;
-            }
+            res.status(401).json({ success: false, error: 'Unauthorized: User not found' });
+            return;
+        }
+        if (!user.isActive) {
+            res.status(403).json({ success: false, error: 'Forbidden: Account is deactivated' });
+            return;
         }
         req.user = {
             id: user.id,

@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.handlePresenceEvents = exports.handleUserDisconnect = exports.handleUserConnect = void 0;
 const handleUserConnect = async (io, socket, presenceService) => {
     const userId = socket.data.user.id;
+    socket.join(userId);
     const isNewOnline = await presenceService.setUserOnline(userId);
     if (isNewOnline) {
         io.emit('user_online', { userId });

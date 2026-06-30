@@ -23,7 +23,6 @@ class PresenceService {
         await redis_config_1.default.set(key, 'online', 'EX', 35);
         try {
             await this.userRepo.update(userId, {
-                isActive: true,
                 lastSeen: new Date(),
             });
         }
@@ -49,7 +48,6 @@ class PresenceService {
         const deleted = await redis_config_1.default.del(key);
         try {
             await this.userRepo.update(userId, {
-                isActive: false,
                 lastSeen: new Date(),
             });
         }

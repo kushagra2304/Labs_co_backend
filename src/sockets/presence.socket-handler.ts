@@ -3,6 +3,7 @@ import { PresenceService } from '../services/presence.service';
 
 export const handleUserConnect = async (io: Server, socket: Socket, presenceService: PresenceService) => {
   const userId = socket.data.user.id;
+  socket.join(userId);
   const isNewOnline = await presenceService.setUserOnline(userId);
   if (isNewOnline) {
     io.emit('user_online', { userId });

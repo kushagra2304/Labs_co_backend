@@ -19,7 +19,6 @@ export class PresenceService {
 
     try {
       await this.userRepo.update(userId, {
-        isActive: true,
         lastSeen: new Date(),
       });
     } catch (err) {
@@ -48,7 +47,6 @@ export class PresenceService {
 
     try {
       await this.userRepo.update(userId, {
-        isActive: false,
         lastSeen: new Date(),
       });
     } catch (err) {

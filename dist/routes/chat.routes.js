@@ -20,6 +20,7 @@ router.get('/health', (_req, res) => {
 router.use(require_auth_middleware_1.requireAuth);
 // Employee list
 router.get('/employees', userController.getEmployees);
+router.get('/users', userController.getChatUsers);
 // Conversations
 router.get('/conversations', conversationController.getMyConversations);
 router.post('/conversations', conversationController.createConversation);
