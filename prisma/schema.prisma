@@ -1,0 +1,172 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum ConversationType {
+  DIRECT
+  GROUP
+}
+
+enum ConversationStatus {
+  ACTIVE
+  ARCHIVED
+  CLOSED
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  DOCUMENT
+  AUDIO
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+}
+
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  email     String   @unique
+  avatarUrl String?  @map("avatar_url")
+  role      String   @default("employee")
+  isActive  Boolean  @default(true) @map("is_active")
+  lastSeen  DateTime @default(now()) @map("last_seen")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  createdBy String?   @map("created_by")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedBy String?   @map("updated_by")
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by")
+
+  // Relations
+  members   ConversationMember[]
+  messages  Message[]
+  reactions MessageReaction[]
+
+  @@map("users")
+}
+
+model Conversation {
+  id            String             @id @default(uuid()) @db.Uuid
+  type          ConversationType
+  title         String?
+  status        ConversationStatus @default(ACTIVE)
+  lastMessageAt DateTime           @default(now()) @map("last_message_at")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  createdBy String?   @map("created_by")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedBy String?   @map("updated_by")
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by")
+
+  // Relations
+  members  ConversationMember[]
+  messages Message[]
+
+  @@map("conversations")
+}
+
+model ConversationMember {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  lastReadAt     DateTime @default(now()) @map("last_read_at")
+  joinedAt       DateTime @default(now()) @map("joined_at")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  createdBy String?   @map("created_by")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedBy String?   @map("updated_by")
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by")
+
+  // Relations
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@map("conversation_members")
+  @@unique([conversationId, userId])
+}
+
+model Message {
+  id             String        @id @default(uuid()) @db.Uuid
+  conversationId String        @map("conversation_id") @db.Uuid
+  senderId       String        @map("sender_id") @db.Uuid
+  content        String?
+  messageType    MessageType   @default(TEXT) @map("message_type")
+  status         MessageStatus @default(SENT)
+  replyToId      String?       @map("reply_to_id") @db.Uuid
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  createdBy String?   @map("created_by")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedBy String?   @map("updated_by")
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by")
+
+  // Relations
+  conversation Conversation        @relation(fields: [conversationId], references: [id])
+  sender       User                @relation(fields: [senderId], references: [id])
+  replyTo      Message?            @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies      Message[]           @relation("MessageReplies")
+  attachments  MessageAttachment[]
+  reactions    MessageReaction[]
+
+  @@map("messages")
+}
+
+model MessageAttachment {
+  id            String    @id @default(uuid()) @db.Uuid
+  messageId     String    @map("message_id") @db.Uuid
+  fileName      String    @map("file_name")
+  fileType      String    @map("file_type")
+  fileSizeBytes BigInt    @map("file_size_bytes")
+  r2ObjectKey   String    @map("r2_object_key")
+  cdnUrl        String    @map("cdn_url")
+  r2HardDeleted Boolean   @default(false) @map("r2_hard_deleted")
+  r2DeletedAt   DateTime? @map("r2_deleted_at")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  createdBy String?   @map("created_by")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedBy String?   @map("updated_by")
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by")
+
+  // Relations
+  message Message @relation(fields: [messageId], references: [id])
+
+  @@map("message_attachments")
+}
+
+model MessageReaction {
+  id        String @id @default(uuid()) @db.Uuid
+  messageId String @map("message_id") @db.Uuid
+  userId    String @map("user_id") @db.Uuid
+  emoji     String
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  createdBy String?   @map("created_by")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedBy String?   @map("updated_by")
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by")
+
+  // Relations
+  message Message @relation(fields: [messageId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@map("message_reactions")
+  @@unique([messageId, userId, emoji])
+}
