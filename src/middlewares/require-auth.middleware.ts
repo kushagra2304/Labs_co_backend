@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../config/prisma.config';
+import { verifyToken } from '../utils/jwt.util';
 
 declare global {
   namespace Express {
@@ -14,32 +15,37 @@ declare global {
   }
 }
 
-export const MOCK_USER_ID = '11111111-1111-1111-1111-111111111111';
-
 export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const userId = (req.headers['x-user-id'] as string) || MOCK_USER_ID;
+    const authHeader = req.headers.authorization;
 
-    let user = await prisma.user.findUnique({
-      where: { id: userId },
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      res.status(401).json({ success: false, error: 'Unauthorized: No token provided' });
+      return;
+    }
+
+    const token = authHeader.split(' ')[1];
+
+    let decoded;
+    try {
+      decoded = verifyToken(token);
+    } catch (err) {
+      res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired token' });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
     });
 
     if (!user) {
-      if (userId === MOCK_USER_ID) {
-        user = await prisma.user.create({
-          data: {
-            id: MOCK_USER_ID,
-            name: 'Mock User',
-            email: 'mockuser@example.com',
-            role: 'employee',
-            isActive: true,
-            lastSeen: new Date(),
-          },
-        });
-      } else {
-        res.status(401).json({ success: false, error: 'Unauthorized: User not found' });
-        return;
-      }
+      res.status(401).json({ success: false, error: 'Unauthorized: User not found' });
+      return;
+    }
+
+    if (!user.isActive) {
+      res.status(403).json({ success: false, error: 'Forbidden: Account is deactivated' });
+      return;
     }
 
     req.user = {
