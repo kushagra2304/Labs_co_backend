@@ -1,34 +1,38 @@
 import { Socket } from 'socket.io';
 import prisma from '../config/prisma.config';
-import { MOCK_USER_ID } from './require-auth.middleware';
+import { verifyToken } from '../utils/jwt.util';
 
 export const socketAuthMiddleware = async (socket: Socket, next: (err?: Error) => void) => {
   try {
-    const userId = 
-      (socket.handshake.auth.userId as string) || 
-      (socket.handshake.query.userId as string) || 
-      MOCK_USER_ID;
+    const token =
+      (socket.handshake.auth.token as string) ||
+      (socket.handshake.query.token as string);
 
-    let user = await prisma.user.findUnique({
-      where: { id: userId },
+    if (!token) {
+      next(new Error('Authentication error: No token provided'));
+      return;
+    }
+
+    let decoded;
+    try {
+      decoded = verifyToken(token);
+    } catch (err) {
+      next(new Error('Authentication error: Invalid or expired token'));
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
     });
 
     if (!user) {
-      if (userId === MOCK_USER_ID) {
-        user = await prisma.user.create({
-          data: {
-            id: MOCK_USER_ID,
-            name: 'Mock User',
-            email: 'mockuser@example.com',
-            role: 'employee',
-            isActive: true,
-            lastSeen: new Date(),
-          },
-        });
-      } else {
-        next(new Error('Authentication error: User not found'));
-        return;
-      }
+      next(new Error('Authentication error: User not found'));
+      return;
+    }
+
+    if (!user.isActive) {
+      next(new Error('Authentication error: Account is deactivated'));
+      return;
     }
 
     socket.data.user = {

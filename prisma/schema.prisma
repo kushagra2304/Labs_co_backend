@@ -7,6 +7,72 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// =========================================
+// ENUMS
+// =========================================
+
+enum Role {
+  admin
+  employee
+}
+
+enum ProjectStatus {
+  in_progress
+  completed
+  delayed
+  near_done
+}
+
+enum Priority {
+  high
+  medium
+  low
+}
+
+enum TaskStatus {
+  pending
+  in_progress
+  completed
+  overdue
+}
+
+enum FileType {
+  image
+  pdf
+  doc
+  other
+}
+
+enum RewardType {
+  star
+  badge
+  bonus
+  appreciation
+}
+
+enum NotificationType {
+  task_assigned
+  task_completed
+  project_completed
+  reward
+  reminder
+  message
+}
+
+enum ActionType {
+  task_created
+  task_completed
+  task_updated
+  project_created
+  project_updated
+  project_completed
+  employee_added
+  employee_removed
+  file_uploaded
+  reward_given
+  message_sent
+}
+
 enum ConversationType {
   DIRECT
   GROUP
@@ -32,14 +98,24 @@ enum MessageStatus {
   READ
 }
 
+// =========================================
+// USER (merged: chat fields + project fields)
+// =========================================
+
 model User {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String
-  email     String   @unique
-  avatarUrl String?  @map("avatar_url")
-  role      String   @default("employee")
-  isActive  Boolean  @default(true) @map("is_active")
-  lastSeen  DateTime @default(now()) @map("last_seen")
+  id           String    @id @default(uuid()) @db.Uuid
+  name         String
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  role         Role      @default(employee)
+  avatarUrl    String?   @map("avatar_url")
+  avatarColor  String?   @map("avatar_color")
+  phone        String?
+  department   String?
+  designation  String?
+  joinedDate   DateTime? @map("joined_date")
+  isActive     Boolean   @default(true) @map("is_active")
+  lastSeen     DateTime  @default(now()) @map("last_seen")
 
   createdAt DateTime  @default(now()) @map("created_at")
   createdBy String?   @map("created_by")
@@ -48,13 +124,212 @@ model User {
   deletedAt DateTime? @map("deleted_at")
   deletedBy String?   @map("deleted_by")
 
-  // Relations
-  members   ConversationMember[]
-  messages  Message[]
-  reactions MessageReaction[]
+  // Project module relations
+  projectsCreated    Project[]       @relation("ProjectCreatedBy")
+  projectMemberships ProjectMember[]
+  tasksAssigned      Task[]          @relation("TaskAssignedTo")
+  tasksCreated        Task[]         @relation("TaskAssignedBy")
+  taskUpdates        TaskUpdate[]
+  workLogs           WorkLog[]
+  activityLogs       ActivityLog[]
+  filesUploaded      File[]
+  notifications      Notification[]
+  rewardsReceived    Reward[]        @relation("RewardEmployee")
+  rewardsGiven       Reward[]        @relation("RewardGivenBy")
+
+  // Chat module relations
+  conversationMembers ConversationMember[]
+  messages            Message[]
+  reactions           MessageReaction[]
 
   @@map("users")
 }
+
+// =========================================
+// PROJECT MODULE
+// =========================================
+
+model Project {
+  id              String        @id @default(uuid()) @db.Uuid
+  name            String
+  description     String?
+  status          ProjectStatus @default(in_progress)
+  priority        Priority      @default(medium)
+  progressPercent Int           @default(0) @map("progress_percent")
+  startDate       DateTime?     @map("start_date")
+  deadline        DateTime?
+  createdById     String?       @map("created_by_id") @db.Uuid
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  createdBy String?   @map("created_by")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedBy String?   @map("updated_by")
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by")
+
+  creator  User?           @relation("ProjectCreatedBy", fields: [createdById], references: [id])
+  members  ProjectMember[]
+  tasks    Task[]
+  files    File[]
+  workLogs WorkLog[]
+
+  @@map("projects")
+}
+
+model ProjectMember {
+  id             String   @id @default(uuid()) @db.Uuid
+  projectId      String   @map("project_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  roleInProject  String   @default("member") @map("role_in_project")
+  assignedAt     DateTime @default(now()) @map("assigned_at")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  project Project @relation(fields: [projectId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@map("project_members")
+  @@unique([projectId, userId])
+}
+
+model Task {
+  id          String     @id @default(uuid()) @db.Uuid
+  title       String
+  description String?
+  projectId   String?    @map("project_id") @db.Uuid
+  assignedTo  String?    @map("assigned_to") @db.Uuid
+  assignedBy  String?    @map("assigned_by") @db.Uuid
+  status      TaskStatus @default(pending)
+  priority    Priority   @default(medium)
+  dueDate     DateTime?  @map("due_date")
+  completedAt DateTime?  @map("completed_at")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  createdBy String?   @map("created_by")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedBy String?   @map("updated_by")
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by")
+
+  project  Project? @relation(fields: [projectId], references: [id])
+  assignee User?    @relation("TaskAssignedTo", fields: [assignedTo], references: [id])
+  assigner User?    @relation("TaskAssignedBy", fields: [assignedBy], references: [id])
+
+  taskUpdates TaskUpdate[]
+  workLogs    WorkLog[]
+  files       File[]
+
+  @@map("tasks")
+}
+
+model TaskUpdate {
+  id              String   @id @default(uuid()) @db.Uuid
+  taskId          String   @map("task_id") @db.Uuid
+  updatedById     String?  @map("updated_by_id") @db.Uuid
+  note            String?
+  progressPercent Int?     @map("progress_percent")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  task    Task  @relation(fields: [taskId], references: [id])
+  updater User? @relation(fields: [updatedById], references: [id])
+
+  @@map("task_updates")
+}
+
+model WorkLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  taskId      String?  @map("task_id") @db.Uuid
+  projectId   String?  @map("project_id") @db.Uuid
+  hoursSpent  Decimal  @map("hours_spent")
+  description String?
+  logDate     DateTime @map("log_date")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  user    User     @relation(fields: [userId], references: [id])
+  task    Task?    @relation(fields: [taskId], references: [id])
+  project Project? @relation(fields: [projectId], references: [id])
+
+  @@map("work_logs")
+}
+
+model ActivityLog {
+  id          String     @id @default(uuid()) @db.Uuid
+  userId      String?    @map("user_id") @db.Uuid
+  actionType  ActionType @map("action_type")
+  description String?
+  relatedId   String?    @map("related_id") @db.Uuid
+  relatedType String?    @map("related_type")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@map("activity_logs")
+}
+
+model File {
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String
+  fileUrl    String   @map("file_url")
+  fileType   FileType @default(other) @map("file_type")
+  sizeKb     Int?     @map("size_kb")
+  projectId  String?  @map("project_id") @db.Uuid
+  taskId     String?  @map("task_id") @db.Uuid
+  uploadedBy String?  @map("uploaded_by") @db.Uuid
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  project  Project? @relation(fields: [projectId], references: [id])
+  task     Task?    @relation(fields: [taskId], references: [id])
+  uploader User?    @relation(fields: [uploadedBy], references: [id])
+
+  @@map("files")
+}
+
+model Notification {
+  id          String           @id @default(uuid()) @db.Uuid
+  userId      String           @map("user_id") @db.Uuid
+  type        NotificationType
+  title       String?
+  body        String?
+  isRead      Boolean          @default(false) @map("is_read")
+  relatedId   String?          @map("related_id") @db.Uuid
+  relatedType String?          @map("related_type")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
+}
+
+model Reward {
+  id          String     @id @default(uuid()) @db.Uuid
+  employeeId  String     @map("employee_id") @db.Uuid
+  givenById   String?    @map("given_by_id") @db.Uuid
+  type        RewardType
+  message     String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  employee User  @relation("RewardEmployee", fields: [employeeId], references: [id])
+  giver    User? @relation("RewardGivenBy", fields: [givenById], references: [id])
+
+  @@map("rewards")
+}
+
+// =========================================
+// CHAT MODULE (as provided)
+// =========================================
 
 model Conversation {
   id            String             @id @default(uuid()) @db.Uuid
@@ -70,7 +345,6 @@ model Conversation {
   deletedAt DateTime? @map("deleted_at")
   deletedBy String?   @map("deleted_by")
 
-  // Relations
   members  ConversationMember[]
   messages Message[]
 
@@ -91,7 +365,6 @@ model ConversationMember {
   deletedAt DateTime? @map("deleted_at")
   deletedBy String?   @map("deleted_by")
 
-  // Relations
   conversation Conversation @relation(fields: [conversationId], references: [id])
   user         User         @relation(fields: [userId], references: [id])
 
@@ -115,7 +388,6 @@ model Message {
   deletedAt DateTime? @map("deleted_at")
   deletedBy String?   @map("deleted_by")
 
-  // Relations
   conversation Conversation        @relation(fields: [conversationId], references: [id])
   sender       User                @relation(fields: [senderId], references: [id])
   replyTo      Message?            @relation("MessageReplies", fields: [replyToId], references: [id])
@@ -144,7 +416,6 @@ model MessageAttachment {
   deletedAt DateTime? @map("deleted_at")
   deletedBy String?   @map("deleted_by")
 
-  // Relations
   message Message @relation(fields: [messageId], references: [id])
 
   @@map("message_attachments")
@@ -163,7 +434,6 @@ model MessageReaction {
   deletedAt DateTime? @map("deleted_at")
   deletedBy String?   @map("deleted_by")
 
-  // Relations
   message Message @relation(fields: [messageId], references: [id])
   user    User    @relation(fields: [userId], references: [id])
 
