@@ -1,7 +1,7 @@
 import http from 'http';
 import dotenv from 'dotenv';
-import app from './express-app';
-import { initChatGateway } from './sockets/chat.gateway';
+import app from './app';
+import { initChatGateway } from './lab_chat';
 
 dotenv.config();
 
