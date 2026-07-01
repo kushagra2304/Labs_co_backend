@@ -155,6 +155,25 @@ export class MessageRepository {
     });
   }
 
+  async findUnreadBySender(conversationId: string, excludeSenderId: string) {
+    return prisma.message.findMany({
+      where: {
+        conversationId,
+        senderId: { not: excludeSenderId },
+        status: { not: 'READ' },
+        deletedAt: null,
+      },
+      select: { id: true, senderId: true },
+    });
+  }
+
+  async bulkUpdateStatus(ids: string[], status: MessageStatus) {
+    return prisma.message.updateMany({
+      where: { id: { in: ids } },
+      data: { status },
+    });
+  }
+
   async softDelete(id: string, actorId: string) {
     return prisma.$transaction(async (tx) => {
       const message = await tx.message.update({

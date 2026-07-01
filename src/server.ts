@@ -18,8 +18,10 @@ const socketHttpServer = http.createServer((_req, res) => {
   res.end('Socket Server\n');
 });
 
-initChatGateway(socketHttpServer);
+const socketIo = initChatGateway(socketHttpServer);
+app.set('io', socketIo);
 
 socketHttpServer.listen(socketPort, () => {
   console.log(`⚡ Socket.IO Server running on port ${socketPort}`);
 });
+

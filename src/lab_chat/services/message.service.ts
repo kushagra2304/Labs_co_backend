@@ -100,7 +100,11 @@ export class MessageService {
       throw new Error('You must be a member of the conversation to react');
     }
 
-    return this.reactionRepo.createOrRestore(messageId, userId, emoji, userId);
+    const reaction = await this.reactionRepo.createOrRestore(messageId, userId, emoji, userId);
+    return {
+      reaction,
+      conversationId: message.conversationId,
+    };
   }
 
   async deleteReaction(_messageId: string, reactionId: string, userId: string) {
@@ -113,14 +117,46 @@ export class MessageService {
       throw new Error('You can only delete your own reactions');
     }
 
-    return this.reactionRepo.softDelete(reactionId, userId);
+    const deletedReaction = await this.reactionRepo.softDelete(reactionId, userId);
+    const message = await this.messageRepo.findById(deletedReaction.messageId);
+    
+    return {
+      reaction: deletedReaction,
+      conversationId: message ? message.conversationId : '',
+      messageId: deletedReaction.messageId,
+    };
   }
+
 
   async markAsRead(messageId: string, userId: string) {
     const message = await this.messageRepo.findById(messageId);
-    if (!message) return null;
+    if (!message) return { id: messageId, senderId: '' };
+
+    if (message.senderId === userId) {
+      return { id: messageId, senderId: userId };
+    }
 
     await this.memberRepo.updateLastReadAt(message.conversationId, userId);
-    return this.messageRepo.updateStatus(messageId, 'READ');
+    const updated = await this.messageRepo.updateStatus(messageId, 'READ');
+    // Return object with senderId so the socket handler can notify the correct sender
+    return { id: updated.id, senderId: message.senderId };
+  }
+
+  async markConversationAsRead(conversationId: string, userId: string) {
+    // Find all messages in this conversation not sent by the current user that are not yet READ
+    const unread = await this.messageRepo.findUnreadBySender(conversationId, userId);
+    if (unread.length === 0) return [];
+
+    // Bulk update to READ
+    await this.messageRepo.bulkUpdateStatus(
+      unread.map((m) => m.id),
+      'READ'
+    );
+
+    // Update lastReadAt for the member
+    await this.memberRepo.updateLastReadAt(conversationId, userId);
+
+    // Return only the fields the socket handler needs
+    return unread.map((m) => ({ id: m.id, senderId: m.senderId }));
   }
 }
