@@ -28,7 +28,7 @@ export const handleMessageEvents = (io: Server, socket: Socket, messageService: 
         })),
       };
 
-      // Emit to conversation room (for active chat screen)
+      // Emit to conversation room (people who have joined the room socket)
       io.to(conversationId).emit('new_message', {
         message: serializedMessage,
         conversationId,
@@ -41,20 +41,43 @@ export const handleMessageEvents = (io: Server, socket: Socket, messageService: 
         select: { userId: true },
       });
 
-      // Emit to each member's personal room for real-time notifications/unreads
+      // Emit new_message to every member's personal room so they receive it
+      // even if they haven't join_room'd the conversation socket room
       for (const member of members) {
-        io.to(member.userId).emit('new_message', {
-          message: serializedMessage,
-          conversationId,
-          tempId,
-        });
+        if (member.userId !== userId) {
+          io.to(member.userId).emit('new_message', {
+            message: serializedMessage,
+            conversationId,
+            tempId,
+          });
+        }
       }
 
+      // ACK back to sender first (SENT)
       socket.emit('message_ack', {
         tempId,
         messageId: message.id,
         status: 'SENT',
       });
+
+      // Check if any recipient is currently online (has an active socket in their personal room).
+      // If so, the message is considered DELIVERED — update DB and notify the sender.
+      const recipientIds = members.map((m) => m.userId).filter((id) => id !== userId);
+      for (const recipientId of recipientIds) {
+        const activeSockets = await io.in(recipientId).fetchSockets();
+        if (activeSockets.length > 0) {
+          await prisma.message.update({
+            where: { id: message.id },
+            data: { status: 'DELIVERED' },
+          });
+          // Notify the SENDER (not the recipient) that delivery is confirmed
+          io.to(userId).emit('message_delivered', {
+            messageId: message.id,
+            conversationId,
+          });
+          break; // One online recipient is enough to confirm delivery
+        }
+      }
     } catch (error: any) {
       console.error('Socket send_message error:', error);
       socket.emit('error', { message: error.message || 'Failed to send message' });
@@ -65,14 +88,34 @@ export const handleMessageEvents = (io: Server, socket: Socket, messageService: 
     try {
       if (!messageId || !conversationId) return;
 
-      await messageService.markAsRead(messageId, userId);
+      const result = await messageService.markAsRead(messageId, userId);
 
-      io.to(conversationId).emit('read_receipt', {
+      // Notify the sender that the message has been read
+      io.to(result.senderId).emit('read_receipt', {
         messageId,
+        conversationId,
         userId,
       });
     } catch (error) {
       console.error('Socket message_read error:', error);
+    }
+  });
+
+  socket.on('conversation_read', async ({ conversationId }) => {
+    try {
+      if (!conversationId) return;
+
+      const updatedMessages = await messageService.markConversationAsRead(conversationId, userId);
+      
+      for (const msg of updatedMessages) {
+        io.to(msg.senderId).emit('read_receipt', {
+          messageId: msg.id,
+          conversationId,
+          userId,
+        });
+      }
+    } catch (error) {
+      console.error('Socket conversation_read error:', error);
     }
   });
 };
