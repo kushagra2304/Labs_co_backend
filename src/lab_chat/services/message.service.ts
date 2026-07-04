@@ -20,7 +20,7 @@ export class MessageService {
     }
 
     const offset = (page - 1) * limit;
-    return this.messageRepo.findConversationMessages(conversationId, limit, offset);
+    return this.messageRepo.findConversationMessages(conversationId, limit, offset, true);
   }
 
   async sendMessage(data: {
