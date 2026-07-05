@@ -8,6 +8,7 @@ const dotenv_1 = __importDefault(require("dotenv"));
 const app_1 = __importDefault(require("./app"));
 const lab_chat_1 = require("./lab_chat");
 dotenv_1.default.config();
+console.log("DB target:", process.env.DATABASE_URL);
 const port = process.env.PORT || 5000;
 const socketPort = process.env.SOCKET_PORT || 5001;
 const httpServer = http_1.default.createServer(app_1.default);

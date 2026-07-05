@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CalendarController = void 0;
 const client_1 = __importDefault(require("../../prisma/client"));
+const notification_helper_1 = require("../../helpers/notification.helper");
 class CalendarController {
     getEvents = async (req, res) => {
         const year = parseInt(req.query.year);
@@ -27,7 +28,7 @@ class CalendarController {
             ...tasks.map((t) => ({ id: `task-${t.id}`, date: t.dueDate.toISOString().slice(0, 10), title: t.title })),
             ...projects.map((p) => ({ id: `proj-${p.id}`, date: p.deadline.toISOString().slice(0, 10), title: `${p.name} due` })),
         ];
-        res.json(events);
+        return res.json(events);
     };
     getTasksForDate = async (req, res) => {
         const date = req.query.date;
@@ -40,7 +41,7 @@ class CalendarController {
             include: { assignee: { select: { name: true } } },
             orderBy: { createdAt: "asc" },
         });
-        res.json(tasks.map((t) => ({
+        return res.json(tasks.map((t) => ({
             id: t.id,
             date,
             name: t.title,
@@ -68,7 +69,17 @@ class CalendarController {
             },
             include: { assignee: { select: { name: true } } },
         });
-        res.status(201).json({
+        // Notify employee about task assignment
+        await (0, notification_helper_1.publishActivity)({
+            userId: assigneeUser.id,
+            type: 'task_assigned',
+            title: 'New task assigned',
+            body: `Admin assigned you task: "${task.title}"`,
+            relatedId: task.id,
+            relatedType: 'Task',
+            io: req.app.get('io')
+        });
+        return res.status(201).json({
             id: task.id,
             date,
             name: task.title,
@@ -86,7 +97,19 @@ class CalendarController {
             where: { id },
             data: { deletedAt: new Date(), deletedBy: req.user.id },
         });
-        res.status(204).send();
+        // Notify employee if the task was assigned to someone
+        if (existing.assignedTo) {
+            await (0, notification_helper_1.publishActivity)({
+                userId: existing.assignedTo,
+                type: 'reminder',
+                title: 'Task deleted by admin',
+                body: `Task "${existing.title}" has been deleted.`,
+                relatedId: existing.id,
+                relatedType: 'Task',
+                io: req.app.get('io')
+            });
+        }
+        return res.status(204).send();
     };
 }
 exports.CalendarController = CalendarController;

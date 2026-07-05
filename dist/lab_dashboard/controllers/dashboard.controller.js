@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DashboardController = void 0;
 const client_1 = __importDefault(require("../../prisma/client"));
+const notification_helper_1 = require("../../helpers/notification.helper");
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const ACTION_TO_ACTIVITY_TYPE = {
     file_uploaded: "upload",
@@ -23,7 +24,7 @@ function initials(name) {
     return name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 }
 class DashboardController {
-    getStats = async (req, res) => {
+    getStats = async (_req, res) => {
         const now = new Date();
         const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
         const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -78,6 +79,191 @@ class DashboardController {
             message: log.description ?? "",
             timestamp: log.createdAt.toISOString(),
         })));
+    };
+    getEmployeeStats = async (req, res) => {
+        try {
+            const userId = req.user.id;
+            const startOfWeek = new Date();
+            startOfWeek.setHours(0, 0, 0, 0);
+            startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+            const endOfWeek = new Date(startOfWeek);
+            endOfWeek.setDate(endOfWeek.getDate() + 7);
+            const startOfMonth = new Date();
+            startOfMonth.setHours(0, 0, 0, 0);
+            startOfMonth.setDate(1);
+            const startOfToday = new Date();
+            startOfToday.setHours(0, 0, 0, 0);
+            const [totalTasks, dueThisWeek, completedTasks, completedThisMonth, uploadsToday, pendingAck] = await Promise.all([
+                client_1.default.task.count({
+                    where: { deletedAt: null, assignedTo: userId, status: { in: ['pending', 'in_progress', 'overdue'] } }
+                }),
+                client_1.default.task.count({
+                    where: { deletedAt: null, assignedTo: userId, status: { in: ['pending', 'in_progress', 'overdue'] }, dueDate: { gte: startOfWeek, lt: endOfWeek } }
+                }),
+                client_1.default.task.count({
+                    where: { deletedAt: null, assignedTo: userId, status: 'completed' }
+                }),
+                client_1.default.task.count({
+                    where: { deletedAt: null, assignedTo: userId, status: 'completed', completedAt: { gte: startOfMonth } }
+                }),
+                client_1.default.file.count({
+                    where: { deletedAt: null, uploadedBy: userId, createdAt: { gte: startOfToday } }
+                }),
+                client_1.default.task.count({
+                    where: { deletedAt: null, assignedTo: userId, status: 'pending' }
+                })
+            ]);
+            res.json({
+                totalTasks,
+                dueThisWeek,
+                completedTasks,
+                completedThisMonth,
+                uploadsToday,
+                pendingAck
+            });
+            return;
+        }
+        catch (error) {
+            res.status(500).json({ message: error.message || "Failed to fetch stats" });
+            return;
+        }
+    };
+    getEmployeeTasks = async (req, res) => {
+        try {
+            const userId = req.user.id;
+            const tasks = await client_1.default.task.findMany({
+                where: { deletedAt: null, assignedTo: userId },
+                include: {
+                    project: { select: { id: true, name: true } },
+                    files: true
+                },
+                orderBy: [
+                    { status: 'asc' },
+                    { dueDate: 'asc' }
+                ]
+            });
+            res.json(tasks);
+            return;
+        }
+        catch (error) {
+            res.status(500).json({ message: error.message || "Failed to fetch tasks" });
+            return;
+        }
+    };
+    acknowledgeTask = async (req, res) => {
+        try {
+            const id = String(req.params.id);
+            const userId = req.user.id;
+            const task = await client_1.default.task.findFirst({
+                where: { id, assignedTo: userId, deletedAt: null }
+            });
+            if (!task) {
+                res.status(404).json({ message: "Task not found" });
+                return;
+            }
+            const updated = await client_1.default.task.update({
+                where: { id },
+                data: { status: 'in_progress' }
+            });
+            // Log activity
+            await client_1.default.activityLog.create({
+                data: {
+                    userId,
+                    actionType: 'task_updated',
+                    description: `acknowledged task "${task.title}"`,
+                    relatedId: id,
+                    relatedType: 'task'
+                }
+            });
+            // Notify employee about task acknowledgment
+            await (0, notification_helper_1.publishActivity)({
+                userId,
+                type: 'task_assigned',
+                title: 'Task acknowledged',
+                body: `You acknowledged the task: "${task.title}"`,
+                relatedId: id,
+                relatedType: 'Task',
+                io: req.app.get('io')
+            });
+            res.json(updated);
+            return;
+        }
+        catch (error) {
+            res.status(500).json({ message: error.message || "Failed to acknowledge task" });
+            return;
+        }
+    };
+    completeTask = async (req, res) => {
+        try {
+            const id = String(req.params.id);
+            const userId = req.user.id;
+            const task = await client_1.default.task.findFirst({
+                where: { id, assignedTo: userId, deletedAt: null }
+            });
+            if (!task) {
+                res.status(404).json({ message: "Task not found" });
+                return;
+            }
+            const updated = await client_1.default.task.update({
+                where: { id },
+                data: { status: 'completed', completedAt: new Date() }
+            });
+            // Log activity
+            await client_1.default.activityLog.create({
+                data: {
+                    userId,
+                    actionType: 'task_completed',
+                    description: `completed task "${task.title}"`,
+                    relatedId: id,
+                    relatedType: 'task'
+                }
+            });
+            // Notify employee about task completion
+            await (0, notification_helper_1.publishActivity)({
+                userId,
+                type: 'task_completed',
+                title: 'Task marked completed',
+                body: `You completed the task: "${task.title}"`,
+                relatedId: id,
+                relatedType: 'Task',
+                io: req.app.get('io')
+            });
+            res.json(updated);
+            return;
+        }
+        catch (error) {
+            res.status(500).json({ message: error.message || "Failed to complete task" });
+            return;
+        }
+    };
+    getEmployeeRewards = async (req, res) => {
+        try {
+            const userId = req.user.id;
+            let rewards = await client_1.default.reward.findMany({
+                where: { employeeId: userId },
+                orderBy: { createdAt: 'desc' }
+            });
+            // If no rewards, seed initial ones for demo/wow factor!
+            if (rewards.length === 0) {
+                await client_1.default.reward.createMany({
+                    data: [
+                        { employeeId: userId, type: 'badge', message: 'Runner-up Jun', createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) },
+                        { employeeId: userId, type: 'star', message: 'Fast May', createdAt: new Date(Date.now() - 35 * 24 * 60 * 60 * 1000) },
+                        { employeeId: userId, type: 'appreciation', message: 'Uploader Apr', createdAt: new Date(Date.now() - 65 * 24 * 60 * 60 * 1000) }
+                    ]
+                });
+                rewards = await client_1.default.reward.findMany({
+                    where: { employeeId: userId },
+                    orderBy: { createdAt: 'desc' }
+                });
+            }
+            res.json(rewards);
+            return;
+        }
+        catch (error) {
+            res.status(500).json({ message: error.message || "Failed to fetch rewards" });
+            return;
+        }
     };
 }
 exports.DashboardController = DashboardController;

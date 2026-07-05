@@ -264,6 +264,33 @@ async function main() {
   }
   console.log("Created 5 notifications for the admin user\n");
 
+  // ── Notifications — for employees ──
+  const employeeNotifTemplates: { type: NotificationType; title: string; body: string }[] = [
+    { type: "task_assigned", title: "New task assigned", body: "Admin assigned you task: \"Foundation Survey\"" },
+    { type: "message", title: "Message from Admin", body: "Admin: \"Please check the latest drawing upload.\"" },
+    { type: "project_completed", title: "Drawing approved", body: "Your uploaded structural drawing has been approved by Admin." },
+    { type: "reward", title: "Badge earned", body: "You earned the \"Fast Delivery\" badge for early submission." },
+    { type: "reminder", title: "Deadline changed", body: "The deadline for task \"Column Layout\" has been extended by 3 days." },
+    { type: "reminder", title: "Meeting scheduled", body: "Site meeting scheduled for tomorrow at 10:00 AM." },
+  ];
+
+  for (const emp of employees) {
+    for (let i = 0; i < employeeNotifTemplates.length; i++) {
+      const t = employeeNotifTemplates[i];
+      await prisma.notification.create({
+        data: {
+          userId: emp.id,
+          type: t.type,
+          title: t.title,
+          body: t.body,
+          isRead: i > 2,
+          createdAt: new Date(Date.now() - i * 1000 * 60 * 60 * 4), // spaced out
+        },
+      });
+    }
+  }
+  console.log(`Created ${employeeNotifTemplates.length * employees.length} notifications for employees\n`);
+
   console.log("✅ Seed complete.\n");
   console.log("Login credentials for testing:");
   console.log(`  ${ADMIN.email} / ${PASSWORD}  (admin)`);

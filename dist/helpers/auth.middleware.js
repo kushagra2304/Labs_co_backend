@@ -7,10 +7,6 @@ exports.verifyToken = verifyToken;
 exports.requireRole = requireRole;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const client_1 = __importDefault(require("../prisma/client"));
-// No local AuthedRequest interface — req.user is already typed globally
-// by lab_auth's Express.Request augmentation ({ id, name, email, role }).
-// Redeclaring it here with a narrower role type is what caused the
-// "incorrectly extends" error.
 async function verifyToken(req, res, next) {
     const header = req.headers.authorization;
     const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
@@ -27,9 +23,8 @@ async function verifyToken(req, res, next) {
         });
         if (!user)
             return res.status(401).json({ message: "User not found" });
-        // Matches the global Request.user shape exactly — no cast needed.
         req.user = { id: user.id, name: user.name, email: user.email, role: user.role };
-        next();
+        return next();
     }
     catch {
         return res.status(401).json({ message: "Invalid or expired token" });
@@ -40,6 +35,6 @@ function requireRole(...roles) {
         if (!req.user || !roles.includes(req.user.role)) {
             return res.status(403).json({ message: "Forbidden" });
         }
-        next();
+        return next();
     };
 }
