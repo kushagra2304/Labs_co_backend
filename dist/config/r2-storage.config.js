@@ -19,6 +19,7 @@ exports.s3Client = new client_s3_1.S3Client({
         accessKeyId,
         secretAccessKey,
     },
+    forcePathStyle: true,
 });
 exports.r2Config = {
     bucketName,

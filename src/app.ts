@@ -3,7 +3,8 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { authRoutes } from './lab_auth';
 import { chatRoutes } from './lab_chat';
-import { dashboardRoutes } from './lab_dashboard';
+import labDashboardRouter from './lab_dashboard';
+import dashboardRoutes from './lab_dashboard/routes/dashboard.routes'; // for the /employees legacy alias only
 
 const app = express();
 
@@ -23,9 +24,15 @@ app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/chat', chatRoutes);
 app.use('/api/chat', chatRoutes);
 
-// Dashboard module routes — /employees preserved under /api/v1/chat for backward compatibility
+// Legacy alias: /employees (and /stats, /performance-chart, /activity — harmless
+// extras) also reachable under the old chat prefix, for backward compatibility.
 app.use('/api/v1/chat', dashboardRoutes);
 app.use('/api/chat', dashboardRoutes);
+
+// Dashboard module routes (canonical paths)
+// → /api/v1/dashboard/employees, /api/v1/dashboard/stats, /api/v1/projects,
+//   /api/v1/calendar/*, /api/v1/notifications/*
+app.use('/api/v1', labDashboardRouter);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('Unhandled Error:', err);
