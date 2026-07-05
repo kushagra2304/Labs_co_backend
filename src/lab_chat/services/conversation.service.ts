@@ -1,5 +1,6 @@
 import { ConversationRepository } from '../repositories/conversation.repository';
 import { UserRepository } from '../../helpers/user.repository';
+import { ConversationMemberRepository } from '../repositories/conversation-member.repository';
 
 export class ConversationService {
   constructor(
@@ -49,6 +50,45 @@ export class ConversationService {
     }
 
     return this.conversationRepo.createGroup(title, uniqueMembers, creatorId);
+  }
+
+  async addConversationMember(conversationId: string, userId: string, actorId: string) {
+    const conversation = await this.conversationRepo.findById(conversationId);
+    if (!conversation) {
+      throw new Error('Conversation not found');
+    }
+    if (conversation.type !== 'GROUP') {
+      throw new Error('Cannot add members to a direct conversation');
+    }
+    const isActorMember = conversation.members.some((m) => m.userId === actorId);
+    if (!isActorMember) {
+      throw new Error('You must be a member of this conversation to add members');
+    }
+
+    const memberRepo = new ConversationMemberRepository();
+    await memberRepo.addMember(conversationId, userId, actorId);
+    
+    return this.conversationRepo.findById(conversationId);
+  }
+
+  async removeConversationMember(conversationId: string, userId: string, actorId: string) {
+    const conversation = await this.conversationRepo.findById(conversationId);
+    if (!conversation) {
+      throw new Error('Conversation not found');
+    }
+    if (conversation.type !== 'GROUP') {
+      throw new Error('Cannot remove members from a direct conversation');
+    }
+    const isCreator = conversation.createdBy === actorId;
+    const isSelf = userId === actorId;
+    if (!isCreator && !isSelf) {
+      throw new Error('Only the group creator can remove other members');
+    }
+
+    const memberRepo = new ConversationMemberRepository();
+    await memberRepo.removeMember(conversationId, userId, actorId);
+
+    return this.conversationRepo.findById(conversationId);
   }
 
   async getConversationDetails(conversationId: string, userId: string) {

@@ -28,6 +28,9 @@ router.get('/users', userController.getChatUsers);
 router.get('/conversations', conversationController.getMyConversations);
 router.post('/conversations', conversationController.createConversation);
 router.get('/conversations/:conversationId/messages', conversationController.getConversationMessages);
+router.post('/conversations/:conversationId/members', conversationController.addMember);
+router.delete('/conversations/:conversationId/members/:userId', conversationController.removeMember);
+router.post('/conversations/:conversationId/leave', conversationController.leaveGroup);
 
 // Messages
 router.patch('/messages/:messageId', messageController.editMessage);

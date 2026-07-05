@@ -25,7 +25,7 @@ class MessageService {
             throw new Error('You are not a member of this conversation');
         }
         const offset = (page - 1) * limit;
-        return this.messageRepo.findConversationMessages(conversationId, limit, offset);
+        return this.messageRepo.findConversationMessages(conversationId, limit, offset, true);
     }
     async sendMessage(data) {
         const member = await this.memberRepo.findByConversationAndUser(data.conversationId, data.senderId);

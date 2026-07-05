@@ -21,6 +21,29 @@ class MessageController {
                 return;
             }
             const message = await this.messageService.editMessage(messageId, userId, content);
+            const io = req.app.get('io');
+            if (io) {
+                const conversationId = message.conversationId;
+                io.to(conversationId).emit('message_edited', {
+                    messageId,
+                    content,
+                    conversationId,
+                    updatedAt: message.updatedAt,
+                });
+                // Query members to emit to their personal rooms
+                const members = await client_1.default.conversationMember.findMany({
+                    where: { conversationId, deletedAt: null },
+                    select: { userId: true },
+                });
+                for (const member of members) {
+                    io.to(member.userId).emit('message_edited', {
+                        messageId,
+                        content,
+                        conversationId,
+                        updatedAt: message.updatedAt,
+                    });
+                }
+            }
             res.status(200).json({
                 success: true,
                 data: message,
@@ -38,6 +61,27 @@ class MessageController {
             const userId = req.user.id;
             const messageId = req.params.messageId;
             const message = await this.messageService.deleteMessage(messageId, userId);
+            const io = req.app.get('io');
+            if (io) {
+                const conversationId = message.conversationId;
+                io.to(conversationId).emit('message_deleted', {
+                    messageId,
+                    conversationId,
+                    deletedAt: message.deletedAt,
+                });
+                // Query members to emit to their personal rooms
+                const members = await client_1.default.conversationMember.findMany({
+                    where: { conversationId, deletedAt: null },
+                    select: { userId: true },
+                });
+                for (const member of members) {
+                    io.to(member.userId).emit('message_deleted', {
+                        messageId,
+                        conversationId,
+                        deletedAt: message.deletedAt,
+                    });
+                }
+            }
             res.status(200).json({
                 success: true,
                 data: message,

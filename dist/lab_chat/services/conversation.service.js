@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ConversationService = void 0;
 const conversation_repository_1 = require("../repositories/conversation.repository");
 const user_repository_1 = require("../../helpers/user.repository");
+const conversation_member_repository_1 = require("../repositories/conversation-member.repository");
 class ConversationService {
     conversationRepo;
     userRepo;
@@ -43,6 +44,39 @@ class ConversationService {
             }
         }
         return this.conversationRepo.createGroup(title, uniqueMembers, creatorId);
+    }
+    async addConversationMember(conversationId, userId, actorId) {
+        const conversation = await this.conversationRepo.findById(conversationId);
+        if (!conversation) {
+            throw new Error('Conversation not found');
+        }
+        if (conversation.type !== 'GROUP') {
+            throw new Error('Cannot add members to a direct conversation');
+        }
+        const isActorMember = conversation.members.some((m) => m.userId === actorId);
+        if (!isActorMember) {
+            throw new Error('You must be a member of this conversation to add members');
+        }
+        const memberRepo = new conversation_member_repository_1.ConversationMemberRepository();
+        await memberRepo.addMember(conversationId, userId, actorId);
+        return this.conversationRepo.findById(conversationId);
+    }
+    async removeConversationMember(conversationId, userId, actorId) {
+        const conversation = await this.conversationRepo.findById(conversationId);
+        if (!conversation) {
+            throw new Error('Conversation not found');
+        }
+        if (conversation.type !== 'GROUP') {
+            throw new Error('Cannot remove members from a direct conversation');
+        }
+        const isCreator = conversation.createdBy === actorId;
+        const isSelf = userId === actorId;
+        if (!isCreator && !isSelf) {
+            throw new Error('Only the group creator can remove other members');
+        }
+        const memberRepo = new conversation_member_repository_1.ConversationMemberRepository();
+        await memberRepo.removeMember(conversationId, userId, actorId);
+        return this.conversationRepo.findById(conversationId);
     }
     async getConversationDetails(conversationId, userId) {
         const conversation = await this.conversationRepo.findById(conversationId);
