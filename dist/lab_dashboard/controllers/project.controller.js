@@ -44,13 +44,13 @@ function toListJSON(p) {
     };
 }
 class ProjectController {
-    listProjects = async (req, res) => {
+    listProjects = async (_req, res) => {
         const projects = await client_1.default.project.findMany({
             where: { deletedAt: null },
             orderBy: { createdAt: "desc" },
             include: { creator: { select: { name: true } }, members: { select: { id: true } } },
         });
-        res.json(projects.map(toListJSON));
+        return res.json(projects.map(toListJSON));
     };
     getProject = async (req, res) => {
         const id = String(req.params.id);
@@ -70,7 +70,7 @@ class ProjectController {
             counts[f.fileType]++;
             totalKb += f.sizeKb ?? 0;
         }
-        res.json({
+        return res.json({
             ...toListJSON(project),
             media: {
                 usedGB: Number((totalKb / 1_000_000).toFixed(2)),
@@ -99,7 +99,7 @@ class ProjectController {
             },
             include: { creator: { select: { name: true } }, members: true },
         });
-        res.status(201).json(toListJSON(project));
+        return res.status(201).json(toListJSON(project));
     };
     updateProject = async (req, res) => {
         const id = String(req.params.id);
@@ -120,7 +120,7 @@ class ProjectController {
             },
             include: { creator: { select: { name: true } }, members: true },
         });
-        res.json(toListJSON(project));
+        return res.json(toListJSON(project));
     };
     deleteProject = async (req, res) => {
         const id = String(req.params.id);
@@ -131,7 +131,7 @@ class ProjectController {
             where: { id },
             data: { deletedAt: new Date(), deletedBy: req.user.id },
         });
-        res.status(204).send();
+        return res.status(204).send();
     };
 }
 exports.ProjectController = ProjectController;

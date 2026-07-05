@@ -18,6 +18,9 @@ class NotificationController {
             body: n.body ?? "",
             timestamp: n.createdAt.toISOString(),
             read: n.isRead,
+            type: n.type,
+            relatedId: n.relatedId,
+            relatedType: n.relatedType,
         })));
     };
     markRead = async (req, res) => {

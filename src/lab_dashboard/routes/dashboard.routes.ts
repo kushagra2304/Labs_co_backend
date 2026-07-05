@@ -19,4 +19,11 @@ router.get('/stats', dashboardController.getStats);
 router.get('/performance-chart', dashboardController.getPerformanceChart);
 router.get('/activity', dashboardController.getActivity);
 
+// Employee Dashboard routes
+router.get('/employee/stats', dashboardController.getEmployeeStats);
+router.get('/employee/tasks', dashboardController.getEmployeeTasks);
+router.post('/employee/tasks/:id/acknowledge', dashboardController.acknowledgeTask);
+router.post('/employee/tasks/:id/complete', dashboardController.completeTask);
+router.get('/employee/rewards', dashboardController.getEmployeeRewards);
+
 export default router;

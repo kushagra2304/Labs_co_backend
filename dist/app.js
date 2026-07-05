@@ -8,7 +8,8 @@ const cors_1 = __importDefault(require("cors"));
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const lab_auth_1 = require("./lab_auth");
 const lab_chat_1 = require("./lab_chat");
-const lab_dashboard_1 = require("./lab_dashboard");
+const lab_dashboard_1 = __importDefault(require("./lab_dashboard"));
+const dashboard_routes_1 = __importDefault(require("./lab_dashboard/routes/dashboard.routes")); // for the /employees legacy alias only
 const app = (0, express_1.default)();
 app.use((0, cors_1.default)({
     origin: '*',
@@ -22,9 +23,14 @@ app.use('/api/v1/auth', lab_auth_1.authRoutes);
 // Chat module routes
 app.use('/api/v1/chat', lab_chat_1.chatRoutes);
 app.use('/api/chat', lab_chat_1.chatRoutes);
-// Dashboard module routes — /employees preserved under /api/v1/chat for backward compatibility
-app.use('/api/v1/chat', lab_dashboard_1.dashboardRoutes);
-app.use('/api/chat', lab_dashboard_1.dashboardRoutes);
+// Legacy alias: /employees (and /stats, /performance-chart, /activity — harmless
+// extras) also reachable under the old chat prefix, for backward compatibility.
+app.use('/api/v1/chat', dashboard_routes_1.default);
+app.use('/api/chat', dashboard_routes_1.default);
+// Dashboard module routes (canonical paths)
+// → /api/v1/dashboard/employees, /api/v1/dashboard/stats, /api/v1/projects,
+//   /api/v1/calendar/*, /api/v1/notifications/*
+app.use('/api/v1', lab_dashboard_1.default);
 app.use((err, _req, res, _next) => {
     console.error('Unhandled Error:', err);
     res.status(err.status || 500).json({

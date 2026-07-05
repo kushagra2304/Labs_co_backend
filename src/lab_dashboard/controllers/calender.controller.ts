@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import  prisma  from '../../prisma/client';
+import { publishActivity } from '../../helpers/notification.helper';
 
 export class CalendarController {
   getEvents = async (req: Request, res: Response) => {
@@ -75,6 +76,17 @@ export class CalendarController {
       include: { assignee: { select: { name: true } } },
     });
 
+    // Notify employee about task assignment
+    await publishActivity({
+      userId: assigneeUser.id,
+      type: 'task_assigned',
+      title: 'New task assigned',
+      body: `Admin assigned you task: "${task.title}"`,
+      relatedId: task.id,
+      relatedType: 'Task',
+      io: req.app.get('io')
+    });
+
     return res.status(201).json({
       id: task.id,
       date,
@@ -94,6 +106,20 @@ export class CalendarController {
       where: { id },
       data: { deletedAt: new Date(), deletedBy: req.user!.id },
     });
+
+    // Notify employee if the task was assigned to someone
+    if (existing.assignedTo) {
+      await publishActivity({
+        userId: existing.assignedTo,
+        type: 'reminder',
+        title: 'Task deleted by admin',
+        body: `Task "${existing.title}" has been deleted.`,
+        relatedId: existing.id,
+        relatedType: 'Task',
+        io: req.app.get('io')
+      });
+    }
+
     return res.status(204).send();
   };
 }

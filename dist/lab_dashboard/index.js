@@ -3,6 +3,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.dashboardRoutes = void 0;
+const express_1 = require("express");
 const dashboard_routes_1 = __importDefault(require("./routes/dashboard.routes"));
-exports.dashboardRoutes = dashboard_routes_1.default;
+const projects_routes_1 = __importDefault(require("./routes/projects.routes"));
+const calender_routes_1 = __importDefault(require("./routes/calender.routes"));
+const notification_routes_1 = __importDefault(require("./routes/notification.routes"));
+const router = (0, express_1.Router)();
+router.use('/dashboard', dashboard_routes_1.default);
+router.use('/projects', projects_routes_1.default);
+router.use('/calendar', calender_routes_1.default);
+router.use('/notifications', notification_routes_1.default);
+exports.default = router;
