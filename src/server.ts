@@ -4,6 +4,7 @@ import app from './app';
 import { initChatGateway } from './lab_chat';
 
 dotenv.config();
+console.log("DB target:", process.env.DATABASE_URL);
 
 const port = process.env.PORT || 5000;
 const socketPort = process.env.SOCKET_PORT || 5001;
