@@ -38,6 +38,15 @@ class UserRepository {
             orderBy: { name: 'asc' },
         });
     }
+    async findActiveEmployees() {
+        return client_1.default.user.findMany({
+            where: {
+                isActive: true,
+                deletedAt: null,
+            },
+            orderBy: { name: 'asc' },
+        });
+    }
     async create(data, actorId) {
         return client_1.default.user.create({
             data: {

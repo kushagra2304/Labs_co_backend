@@ -18,4 +18,19 @@ export class UserController {
       });
     }
   };
+
+  getActiveEmployees = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const users = await this.userRepo.findActiveEmployees();
+      res.status(200).json({
+        success: true,
+        data: users,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error.message || 'Failed to fetch active employees',
+      });
+    }
+  };
 }

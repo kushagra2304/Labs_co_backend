@@ -38,6 +38,16 @@ export class UserRepository {
     });
   }
 
+  async findActiveEmployees(): Promise<User[]> {
+    return prisma.user.findMany({
+      where: {
+        isActive: true,
+        deletedAt: null,
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
   async create(data: Omit<Prisma.UserCreateInput, 'createdAt' | 'updatedAt' | 'deletedAt'>, actorId?: string): Promise<User> {
     return prisma.user.create({
       data: {

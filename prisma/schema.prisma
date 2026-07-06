@@ -27,6 +27,7 @@ enum Priority {
   high
   medium
   low
+  critical
 }
 
 enum TaskStatus {
@@ -34,6 +35,13 @@ enum TaskStatus {
   in_progress
   completed
   overdue
+  blocked
+  on_hold
+}
+
+enum TaskType {
+  ADMIN_ASSIGNED
+  PERSONAL
 }
 
 enum FileType {
@@ -116,6 +124,12 @@ model User {
   joinedDate   DateTime? @map("joined_date")
   isActive     Boolean   @default(true) @map("is_active")
   lastSeen     DateTime  @default(now()) @map("last_seen")
+
+  username       String?   @unique @map("username")
+  gender         String?
+  dateOfBirth    DateTime? @map("date_of_birth")
+  employmentType String?   @map("employment_type")
+  employeeId     String?   @unique @map("employee_id")
 
   createdAt DateTime  @default(now()) @map("created_at")
   createdBy String?   @map("created_by")
@@ -212,6 +226,9 @@ model Task {
   updatedBy String?   @map("updated_by")
   deletedAt DateTime? @map("deleted_at")
   deletedBy String?   @map("deleted_by")
+  isDeleted Boolean   @default(false) @map("is_deleted")
+  estimatedHours Int? @map("estimated_hours")
+  taskType TaskType @default(ADMIN_ASSIGNED) @map("task_type")
 
   project  Project? @relation(fields: [projectId], references: [id])
   assignee User?    @relation("TaskAssignedTo", fields: [assignedTo], references: [id])

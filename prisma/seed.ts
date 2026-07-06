@@ -144,75 +144,7 @@ async function main() {
   }
   console.log(`Created ${projects.length} projects (with members + files)\n`);
 
-  // ── Tasks — spread across the last 12 months, for the performance chart ──
-  let taskCount = 0;
-  for (let monthsAgo = 11; monthsAgo >= 0; monthsAgo--) {
-    const monthDate = new Date();
-    monthDate.setMonth(monthDate.getMonth() - monthsAgo);
-    monthDate.setDate(1);
-
-    const tasksThisMonth = 8 + Math.floor(Math.random() * 10); // 8-17 tasks/month
-
-    for (let i = 0; i < tasksThisMonth; i++) {
-      const createdAt = new Date(monthDate);
-      createdAt.setDate(1 + Math.floor(Math.random() * 27));
-
-      const isOlderMonth = monthsAgo >= 1;
-      const completed = isOlderMonth ? Math.random() < 0.75 : Math.random() < 0.45;
-      const status = completed
-        ? ("completed" as const)
-        : randomItem(["pending", "in_progress", "overdue"] as const);
-
-      const dueDate = new Date(createdAt);
-      dueDate.setDate(dueDate.getDate() + 3 + Math.floor(Math.random() * 10));
-
-      const completedAt = completed
-        ? new Date(createdAt.getTime() + (1 + Math.random() * 8) * 24 * 60 * 60 * 1000)
-        : null;
-
-      await prisma.task.create({
-        data: {
-          title: randomItem(TASK_TITLES),
-          description: `Category: ${randomItem(["Design", "Engineering", "Marketing", "Operations"])}`,
-          projectId: randomItem(projects).id,
-          assignedTo: randomItem(employees).id,
-          assignedBy: admin.id,
-          status,
-          priority: randomItem(["high", "medium", "low"] as const),
-          dueDate,
-          completedAt,
-          createdAt,
-          createdBy: admin.id,
-        },
-      });
-      taskCount++;
-    }
-  }
-  console.log(`Created ${taskCount} tasks spread across the last 12 months\n`);
-
-  // ── A few tasks due around today, for the calendar/task-modal ──
-  for (let dayOffset = -2; dayOffset <= 5; dayOffset++) {
-    if (Math.random() < 0.5) continue;
-    const due = new Date();
-    due.setDate(due.getDate() + dayOffset);
-    due.setHours(9, 0, 0, 0);
-
-    await prisma.task.create({
-      data: {
-        title: randomItem(TASK_TITLES),
-        description: `Category: ${randomItem(["Design", "Engineering", "Marketing", "Operations"])}`,
-        projectId: randomItem(projects).id,
-        assignedTo: randomItem(employees).id,
-        assignedBy: admin.id,
-        status: dayOffset < 0 ? "completed" : "pending",
-        priority: randomItem(["high", "medium", "low"] as const),
-        dueDate: due,
-        completedAt: dayOffset < 0 ? due : null,
-        createdBy: admin.id,
-      },
-    });
-  }
-  console.log("Seeded a few near-term tasks around today for the calendar\n");
+  console.log("Skipping task seeding to ensure a completely clean start.\n");
 
   // ── Activity log — recent events for the Live Activity feed ──
   const activityDescriptions: Record<string, string[]> = {
