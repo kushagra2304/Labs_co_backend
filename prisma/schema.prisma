@@ -156,6 +156,12 @@ model User {
   messages            Message[]
   reactions           MessageReaction[]
 
+  // Attendance module relations
+  attendances            Attendance[]
+  attendanceRequests     AttendanceRequest[]
+  attendanceNotifications AttendanceNotification[]
+  auditLogs              AuditLog[]
+
   @@map("users")
 }
 
@@ -457,3 +463,171 @@ model MessageReaction {
   @@map("message_reactions")
   @@unique([messageId, userId, emoji])
 }
+
+model Attendance {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  date          DateTime  @db.Date
+  status        String
+  checkIn       DateTime? @map("check_in")
+  checkOut      DateTime? @map("check_out")
+  workingHours  Decimal?  @map("working_hours")
+  breakDuration Decimal?  @map("break_duration")
+  overtime      Decimal?  @map("overtime")
+  source        String?
+  wifiUsed      String?   @map("wifi_used")
+  officeName    String?   @map("office_name")
+  deviceInfo    String?   @map("device_info")
+  ipAddress     String?   @map("ip_address")
+  latitude      Float?
+  longitude     Float?
+  notes         String?
+  adminRemarks  String?   @map("admin_remarks")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  createdBy String?   @map("created_by")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedBy String?   @map("updated_by")
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by")
+  isDeleted Boolean   @default(false) @map("is_deleted")
+
+  user      User      @relation(fields: [userId], references: [id])
+  histories AttendanceHistory[]
+
+  @@unique([userId, date])
+  @@map("attendances")
+}
+
+model AttendanceRequest {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  date         DateTime  @db.Date
+  status       String    @default("pending") // pending, approved, rejected
+  reason       String
+  notes        String?
+  adminRemarks String?   @map("admin_remarks")
+  approvedAt   DateTime? @map("approved_at")
+  approvedBy   String?   @map("approved_by")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  createdBy String?   @map("created_by")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedBy String?   @map("updated_by")
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by")
+  isDeleted Boolean   @default(false) @map("is_deleted")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("attendance_requests")
+}
+
+model AttendanceHistory {
+  id           String    @id @default(uuid()) @db.Uuid
+  attendanceId String    @map("attendance_id") @db.Uuid
+  changedBy    String?   @map("changed_by")
+  oldStatus    String?   @map("old_status")
+  newStatus    String?   @map("new_status")
+  oldCheckIn   DateTime? @map("old_check_in")
+  newCheckIn   DateTime? @map("new_check_in")
+  oldCheckOut  DateTime? @map("old_check_out")
+  newCheckOut  DateTime? @map("new_check_out")
+  remarks      String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  attendance Attendance @relation(fields: [attendanceId], references: [id])
+
+  @@map("attendance_histories")
+}
+
+model OfficeWifi {
+  id          String    @id @default(uuid()) @db.Uuid
+  officeName  String    @map("office_name")
+  ssid        String
+  bssid       String    @unique
+  staticIp    String?   @map("static_ip")
+  floor       String?
+  description String?
+  isActive    Boolean   @default(true) @map("is_active")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  createdBy String?   @map("created_by")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedBy String?   @map("updated_by")
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by")
+  isDeleted Boolean   @default(false) @map("is_deleted")
+
+  @@map("office_wifis")
+}
+
+model AttendancePolicy {
+  id                  String   @id @default(uuid()) @db.Uuid
+  officeStartTime     String   @default("09:00") @map("office_start_time")
+  officeEndTime       String   @default("18:00") @map("office_end_time")
+  gracePeriod         Int      @default(15) @map("grace_period")
+  lateMinutes         Int      @default(30) @map("late_minutes")
+  halfDayRules        String?  @map("half_day_rules")
+  minimumWorkingHours Float    @default(8.0) @map("minimum_working_hours")
+  maximumWorkingHours Float    @default(12.0) @map("maximum_working_hours")
+  overtimeRules       String?  @map("overtime_rules")
+  autoCheckout        Boolean  @default(true) @map("auto_checkout")
+  workingDays         String   @default("1,2,3,4,5") @map("working_days") // 1=Mon, 7=Sun
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@map("attendance_policies")
+}
+
+model Holiday {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String
+  date        DateTime  @db.Date
+  isRecurring Boolean   @default(false) @map("is_recurring")
+  description String?
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  createdBy String?   @map("created_by")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedBy String?   @map("updated_by")
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by")
+  isDeleted Boolean   @default(false) @map("is_deleted")
+
+  @@map("holidays")
+}
+
+model AttendanceNotification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  title     String
+  message   String
+  isRead    Boolean   @default(false) @map("is_read")
+  type      String
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("attendance_notifications")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  action    String
+  details   String?
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
+
