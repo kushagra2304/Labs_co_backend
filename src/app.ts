@@ -5,6 +5,7 @@ import { authRoutes } from './lab_auth';
 import { chatRoutes } from './lab_chat';
 import labDashboardRouter from './lab_dashboard';
 import dashboardRoutes from './lab_dashboard/routes/dashboard.routes'; // for the /employees legacy alias only
+import { attendanceRouter } from './lab_attendance';
 
 const app = express();
 
@@ -28,6 +29,9 @@ app.use('/api/chat', chatRoutes);
 // extras) also reachable under the old chat prefix, for backward compatibility.
 app.use('/api/v1/chat', dashboardRoutes);
 app.use('/api/chat', dashboardRoutes);
+
+// Attendance routes
+app.use('/api/v1/attendance', attendanceRouter);
 
 // Dashboard module routes (canonical paths)
 // → /api/v1/dashboard/employees, /api/v1/dashboard/stats, /api/v1/projects,
