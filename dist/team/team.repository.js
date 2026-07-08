@@ -141,42 +141,40 @@ class TeamRepository {
     }
     async getSummaryMetrics() {
         const baseWhere = { role: client_2.Role.employee, deletedAt: null };
-        const [total, active, inactive, architects, designers, engineers] = await Promise.all([
-            client_1.default.user.count({ where: baseWhere }),
-            client_1.default.user.count({ where: { ...baseWhere, isActive: true } }),
-            client_1.default.user.count({ where: { ...baseWhere, isActive: false } }),
-            client_1.default.user.count({
-                where: {
-                    ...baseWhere,
-                    designation: { contains: 'Architect', mode: 'insensitive' },
-                },
-            }),
-            client_1.default.user.count({
+        // Get total active employees
+        const total = await client_1.default.user.count({
+            where: baseWhere,
+        });
+        // Get active departments
+        const activeDepts = await client_1.default.department.findMany({
+            where: {
+                isActive: true,
+                deletedAt: null,
+            },
+            orderBy: [
+                { displayOrder: 'asc' },
+                { name: 'asc' },
+            ],
+        });
+        // Count employees for each active department (handles both UUID and string name matching)
+        const deptCounts = await Promise.all(activeDepts.map(async (dept) => {
+            const count = await client_1.default.user.count({
                 where: {
                     ...baseWhere,
                     OR: [
-                        { designation: { contains: 'Designer', mode: 'insensitive' } },
-                        { designation: { contains: 'BIM', mode: 'insensitive' } },
-                    ],
+                        { departmentId: dept.id },
+                        { department: { equals: dept.name, mode: 'insensitive' } }
+                    ]
                 },
-            }),
-            client_1.default.user.count({
-                where: {
-                    ...baseWhere,
-                    OR: [
-                        { designation: { contains: 'Engineer', mode: 'insensitive' } },
-                        { designation: { contains: 'Surveyor', mode: 'insensitive' } },
-                    ],
-                },
-            }),
-        ]);
+            });
+            return {
+                name: dept.name,
+                count,
+            };
+        }));
         return {
             total,
-            active,
-            inactive,
-            architects,
-            designers,
-            engineers,
+            departments: deptCounts,
         };
     }
 }

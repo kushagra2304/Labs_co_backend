@@ -7,6 +7,9 @@ exports.TeamService = void 0;
 const team_repository_1 = require("./team.repository");
 const client_1 = require("@prisma/client");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const client_2 = __importDefault(require("../prisma/client"));
+const feature_settings_service_1 = require("../team_settings/feature_settings.service");
+const isUuid = (val) => /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val);
 class TeamService {
     teamRepo;
     constructor(teamRepo = new team_repository_1.TeamRepository()) {
@@ -27,23 +30,57 @@ class TeamService {
     }
     async createEmployee(data, actorId) {
         const password = data.password || data.temporaryPassword;
-        this.validateEmployeeData({ ...data, password }, false);
-        // Uniqueness validation
-        const existingUsername = await this.teamRepo.findByUsername(data.username);
-        if (existingUsername) {
-            throw new Error('Username already exists');
-        }
-        const existingEmail = await this.teamRepo.findByEmail(data.email);
+        const featureService = new feature_settings_service_1.FeatureSettingsService();
+        const useDesignations = await featureService.isEnabled('useDesignations');
+        this.validateEmployeeData({ ...data, password }, false, useDesignations);
+        const emailVal = data.email.trim().toLowerCase();
+        // Uniqueness validation on email (and username)
+        const existingEmail = await this.teamRepo.findByEmail(emailVal);
         if (existingEmail) {
             throw new Error('Email address is already registered');
         }
-        // Auto-generate employeeId if not provided
-        let empId = data.employeeId?.trim();
-        if (!empId) {
-            const nextSeq = await this.teamRepo.findNextEmployeeSeq();
-            const currentYear = new Date().getFullYear().toString().substring(2);
-            empId = `EMP-${currentYear}-${String(nextSeq).padStart(3, '0')}`;
+        // Validate department exists and is active
+        let deptRecord;
+        if (isUuid(data.department)) {
+            deptRecord = await client_2.default.department.findFirst({
+                where: { id: data.department, deletedAt: null }
+            });
         }
+        else {
+            deptRecord = await client_2.default.department.findFirst({
+                where: { name: { equals: data.department.trim(), mode: 'insensitive' }, deletedAt: null }
+            });
+        }
+        if (!deptRecord) {
+            throw new Error(`Department "${data.department}" does not exist`);
+        }
+        if (!deptRecord.isActive) {
+            throw new Error(`Department "${deptRecord.name}" is deactivated`);
+        }
+        // Validate designation exists and is active
+        let desigRecord = null;
+        if (useDesignations && data.designation) {
+            if (isUuid(data.designation)) {
+                desigRecord = await client_2.default.designation.findFirst({
+                    where: { id: data.designation, deletedAt: null }
+                });
+            }
+            else {
+                desigRecord = await client_2.default.designation.findFirst({
+                    where: { name: { equals: data.designation.trim(), mode: 'insensitive' }, deletedAt: null }
+                });
+            }
+            if (!desigRecord) {
+                throw new Error(`Designation "${data.designation}" does not exist`);
+            }
+            if (!desigRecord.isActive) {
+                throw new Error(`Designation "${desigRecord.name}" is deactivated`);
+            }
+        }
+        // Auto-generate employeeId
+        const nextSeq = await this.teamRepo.findNextEmployeeSeq();
+        const currentYear = new Date().getFullYear().toString().substring(2);
+        const empId = `EMP-${currentYear}-${String(nextSeq).padStart(3, '0')}`;
         // Securely hash password
         const passwordHash = await bcryptjs_1.default.hash(password, 10);
         const name = `${data.firstName.trim()} ${data.lastName.trim()}`;
@@ -52,17 +89,19 @@ class TeamService {
         const avatarColor = colors[Math.floor(Math.random() * colors.length)];
         return this.teamRepo.create({
             name,
-            email: data.email.trim().toLowerCase(),
+            email: emailVal,
             passwordHash,
             role: client_1.Role.employee,
-            username: data.username.trim(),
+            username: emailVal, // Email is the login identifier
             phone: data.phone?.trim() || null,
             gender: data.gender?.trim() || null,
             dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : null,
             joinedDate: data.joinedDate ? new Date(data.joinedDate) : new Date(),
-            employmentType: data.employmentType || 'Full-Time',
-            department: data.department.trim(),
-            designation: data.designation.trim(),
+            employmentType: 'Full-Time', // Defaults to Full-Time, hidden from UI
+            department: deptRecord.name,
+            designation: desigRecord ? desigRecord.name : null,
+            departmentRel: { connect: { id: deptRecord.id } },
+            ...(desigRecord ? { designationRel: { connect: { id: desigRecord.id } } } : {}),
             employeeId: empId,
             avatarColor,
             createdBy: actorId,
@@ -73,19 +112,66 @@ class TeamService {
         if (!existing) {
             throw new Error('Employee not found');
         }
-        this.validateEmployeeData(data, true);
-        // Uniqueness validation on update
-        if (data.username && data.username.trim().toLowerCase() !== existing.username?.toLowerCase()) {
-            const checkUsername = await this.teamRepo.findByUsername(data.username);
-            if (checkUsername && checkUsername.id !== id) {
-                throw new Error('Username already exists');
-            }
-        }
+        const featureService = new feature_settings_service_1.FeatureSettingsService();
+        const useDesignations = await featureService.isEnabled('useDesignations');
+        this.validateEmployeeData(data, true, useDesignations);
+        // Uniqueness validation on email (and username)
         if (data.email && data.email.trim().toLowerCase() !== existing.email.toLowerCase()) {
             const checkEmail = await this.teamRepo.findByEmail(data.email);
             if (checkEmail && checkEmail.id !== id) {
                 throw new Error('Email address is already registered');
             }
+        }
+        // Validate and load new Department if changing
+        let deptRecord = null;
+        if (data.department !== undefined) {
+            if (isUuid(data.department)) {
+                deptRecord = await client_2.default.department.findFirst({
+                    where: { id: data.department, deletedAt: null }
+                });
+            }
+            else {
+                deptRecord = await client_2.default.department.findFirst({
+                    where: { name: { equals: data.department.trim(), mode: 'insensitive' }, deletedAt: null }
+                });
+            }
+            if (!deptRecord) {
+                throw new Error(`Department "${data.department}" does not exist`);
+            }
+            if (!deptRecord.isActive && deptRecord.id !== existing.departmentId) {
+                throw new Error('Department is deactivated');
+            }
+        }
+        // Validate and load new Designation if changing
+        let desigRecord = null;
+        let shouldDisconnectDesignation = false;
+        if (useDesignations) {
+            if (data.designation !== undefined) {
+                if (data.designation === null || data.designation.trim() === '') {
+                    shouldDisconnectDesignation = true;
+                }
+                else {
+                    if (isUuid(data.designation)) {
+                        desigRecord = await client_2.default.designation.findFirst({
+                            where: { id: data.designation, deletedAt: null }
+                        });
+                    }
+                    else {
+                        desigRecord = await client_2.default.designation.findFirst({
+                            where: { name: { equals: data.designation.trim(), mode: 'insensitive' }, deletedAt: null }
+                        });
+                    }
+                    if (!desigRecord) {
+                        throw new Error(`Designation "${data.designation}" does not exist`);
+                    }
+                    if (!desigRecord.isActive && desigRecord.id !== existing.designationId) {
+                        throw new Error(`Designation "${desigRecord.name}" is deactivated`);
+                    }
+                }
+            }
+        }
+        else {
+            shouldDisconnectDesignation = true;
         }
         let name = existing.name;
         if (data.firstName !== undefined || data.lastName !== undefined) {
@@ -96,15 +182,17 @@ class TeamService {
         }
         return this.teamRepo.update(id, {
             name,
-            ...(data.email !== undefined && { email: data.email.trim().toLowerCase() }),
-            ...(data.username !== undefined && { username: data.username.trim() }),
+            ...(data.email !== undefined && {
+                email: data.email.trim().toLowerCase(),
+                username: data.email.trim().toLowerCase()
+            }),
             ...(data.phone !== undefined && { phone: data.phone?.trim() || null }),
             ...(data.gender !== undefined && { gender: data.gender?.trim() || null }),
             ...(data.dateOfBirth !== undefined && { dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : null }),
             ...(data.joinedDate !== undefined && { joinedDate: data.joinedDate ? new Date(data.joinedDate) : null }),
-            ...(data.employmentType !== undefined && { employmentType: data.employmentType }),
-            ...(data.department !== undefined && { department: data.department.trim() }),
-            ...(data.designation !== undefined && { designation: data.designation.trim() }),
+            ...(deptRecord && { department: deptRecord.name, departmentRel: { connect: { id: deptRecord.id } } }),
+            ...(useDesignations ? (desigRecord ? { designation: desigRecord.name, designationRel: { connect: { id: desigRecord.id } } } :
+                (shouldDisconnectDesignation ? { designation: null, designationRel: { disconnect: true } } : {})) : { designation: null, designationRel: { disconnect: true } }),
             ...(data.isActive !== undefined && { isActive: data.isActive }),
             updatedBy: actorId,
         });
@@ -116,7 +204,7 @@ class TeamService {
         }
         return this.teamRepo.softDelete(id, actorId);
     }
-    validateEmployeeData(data, isUpdate = false) {
+    validateEmployeeData(data, isUpdate = false, useDesignations = true) {
         // First Name
         if (!isUpdate || data.firstName !== undefined) {
             if (!data.firstName || typeof data.firstName !== 'string' || !data.firstName.trim()) {
@@ -127,15 +215,6 @@ class TeamService {
         if (!isUpdate || data.lastName !== undefined) {
             if (!data.lastName || typeof data.lastName !== 'string' || !data.lastName.trim()) {
                 throw new Error('Last name is required');
-            }
-        }
-        // Username
-        if (!isUpdate || data.username !== undefined) {
-            if (!data.username || typeof data.username !== 'string' || !data.username.trim()) {
-                throw new Error('Username is required');
-            }
-            if (data.username.length < 3) {
-                throw new Error('Username must be at least 3 characters long');
             }
         }
         // Email
@@ -171,7 +250,7 @@ class TeamService {
             }
         }
         // Designation
-        if (!isUpdate || data.designation !== undefined) {
+        if (useDesignations && (!isUpdate || data.designation !== undefined)) {
             if (!data.designation || typeof data.designation !== 'string' || !data.designation.trim()) {
                 throw new Error('Designation is required');
             }
