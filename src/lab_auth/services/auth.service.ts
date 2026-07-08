@@ -54,7 +54,7 @@ export const loginUser = async (email: string, password: string) => {
   }
 
   if (!user.isActive) {
-    throw { status: 403, message: "Account is deactivated" };
+    throw { status: 403, message: "Your account has been deactivated. Please contact your administrator for assistance." };
   }
 
   const token = signToken({ userId: user.id, role: user.role as "admin" | "employee" });

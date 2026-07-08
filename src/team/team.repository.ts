@@ -23,11 +23,7 @@ export interface PaginatedEmployees {
 
 export interface TeamSummaryMetrics {
   total: number;
-  active: number;
-  inactive: number;
-  architects: number;
-  designers: number;
-  engineers: number;
+  departments: Array<{ name: string; count: number }>;
 }
 
 export class TeamRepository {
@@ -187,50 +183,45 @@ export class TeamRepository {
   async getSummaryMetrics(): Promise<TeamSummaryMetrics> {
     const baseWhere = { role: Role.employee, deletedAt: null };
 
-    const [
-      total,
-      active,
-      inactive,
-      architects,
-      designers,
-      engineers
-    ] = await Promise.all([
-      prisma.user.count({ where: baseWhere }),
-      prisma.user.count({ where: { ...baseWhere, isActive: true } }),
-      prisma.user.count({ where: { ...baseWhere, isActive: false } }),
-      prisma.user.count({
-        where: {
-          ...baseWhere,
-          designation: { contains: 'Architect', mode: 'insensitive' },
-        },
-      }),
-      prisma.user.count({
-        where: {
-          ...baseWhere,
-          OR: [
-            { designation: { contains: 'Designer', mode: 'insensitive' } },
-            { designation: { contains: 'BIM', mode: 'insensitive' } },
-          ],
-        },
-      }),
-      prisma.user.count({
-        where: {
-          ...baseWhere,
-          OR: [
-            { designation: { contains: 'Engineer', mode: 'insensitive' } },
-            { designation: { contains: 'Surveyor', mode: 'insensitive' } },
-          ],
-        },
-      }),
-    ]);
+    // Get total active employees
+    const total = await prisma.user.count({
+      where: baseWhere,
+    });
+
+    // Get active departments
+    const activeDepts = await prisma.department.findMany({
+      where: {
+        isActive: true,
+        deletedAt: null,
+      },
+      orderBy: [
+        { displayOrder: 'asc' },
+        { name: 'asc' },
+      ],
+    });
+
+    // Count employees for each active department (handles both UUID and string name matching)
+    const deptCounts = await Promise.all(
+      activeDepts.map(async (dept) => {
+        const count = await prisma.user.count({
+          where: {
+            ...baseWhere,
+            OR: [
+              { departmentId: dept.id },
+              { department: { equals: dept.name, mode: 'insensitive' } }
+            ]
+          },
+        });
+        return {
+          name: dept.name,
+          count,
+        };
+      })
+    );
 
     return {
       total,
-      active,
-      inactive,
-      architects,
-      designers,
-      engineers,
+      departments: deptCounts,
     };
   }
 }

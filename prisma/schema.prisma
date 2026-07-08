@@ -121,8 +121,13 @@ model User {
   phone        String?
   department   String?
   designation  String?
+  departmentId String?   @map("department_id") @db.Uuid
+  designationId String?   @map("designation_id") @db.Uuid
   joinedDate   DateTime? @map("joined_date")
   isActive     Boolean   @default(true) @map("is_active")
+
+  departmentRel  Department? @relation(fields: [departmentId], references: [id])
+  designationRel Designation? @relation(fields: [designationId], references: [id])
   lastSeen     DateTime  @default(now()) @map("last_seen")
 
   username       String?   @unique @map("username")
@@ -629,5 +634,54 @@ model AuditLog {
   user User? @relation(fields: [userId], references: [id])
 
   @@map("audit_logs")
+}
+
+model Department {
+  id           String        @id @default(uuid()) @db.Uuid
+  name         String        @unique
+  description  String?
+  isActive     Boolean       @default(true) @map("is_active")
+  displayOrder Int           @default(0) @map("display_order")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  createdBy    String?       @map("created_by")
+  updatedBy    String?       @map("updated_by")
+  deletedAt    DateTime?     @map("deleted_at")
+  deletedBy    String?       @map("deleted_by")
+
+  designations Designation[]
+  users        User[]
+
+  @@map("departments")
+}
+
+model Designation {
+  id           String      @id @default(uuid()) @db.Uuid
+  departmentId String?     @map("department_id") @db.Uuid
+  name         String      @unique
+  description  String?
+  isActive     Boolean     @default(true) @map("is_active")
+  displayOrder Int         @default(0) @map("display_order")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  createdBy    String?     @map("created_by")
+  updatedBy    String?     @map("updated_by")
+  deletedAt    DateTime?   @map("deleted_at")
+  deletedBy    String?     @map("deleted_by")
+
+  department   Department? @relation(fields: [departmentId], references: [id])
+  users        User[]
+
+  @@map("designations")
+}
+
+model TeamFeatureSetting {
+  id         String   @id @default(uuid()) @db.Uuid
+  featureKey String   @unique @map("feature_key")
+  enabled    Boolean  @default(true)
+  updatedBy  String?  @map("updated_by")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("team_feature_settings")
 }
 
