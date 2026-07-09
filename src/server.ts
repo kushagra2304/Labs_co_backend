@@ -2,6 +2,7 @@ import http from 'http';
 import dotenv from 'dotenv';
 import app from './app';
 import { initChatGateway } from './lab_chat';
+import { runTaskDeadlineCheck } from './jobs/task-deadline-reminder.job';
 
 dotenv.config();
 console.log("DB target:", process.env.DATABASE_URL);
@@ -25,4 +26,11 @@ app.set('io', socketIo);
 socketHttpServer.listen(socketPort, () => {
   console.log(`⚡ Socket.IO Server running on port ${socketPort}`);
 });
+
+// Task deadline reminders: check for tasks due soon / overdue on a recurring
+// basis (hourly is frequent enough for a due-date reminder, and the job is
+// idempotent so re-runs are harmless). Runs once shortly after boot too.
+const TASK_DEADLINE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+setTimeout(() => runTaskDeadlineCheck(socketIo), 10_000);
+setInterval(() => runTaskDeadlineCheck(socketIo), TASK_DEADLINE_CHECK_INTERVAL_MS);
 

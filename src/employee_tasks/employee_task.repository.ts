@@ -1,5 +1,5 @@
 import prisma from '../prisma/client';
-import { Task, Prisma, TaskStatus, Priority, TaskType, TaskUpdate } from '@prisma/client';
+import { Task, Prisma, TaskStatus, Priority, TaskType, TaskUpdate, TaskSubmission, FileType, File } from '@prisma/client';
 
 export interface EmployeeTaskFilters {
   status?: string;
@@ -18,6 +18,10 @@ export class EmployeeTaskRepository {
     })[];
     assignee: { id: string; name: string; email: string } | null;
     assigner: { id: string; name: string; email: string } | null;
+    submissions: (TaskSubmission & {
+      file: File | null;
+      reviewer: { id: string; name: string; email: string } | null;
+    })[];
   }) | null> {
     return prisma.task.findFirst({
       where: {
@@ -50,6 +54,16 @@ export class EmployeeTaskRepository {
             id: true,
             name: true,
             email: true,
+          },
+        },
+        submissions: {
+          orderBy: { createdAt: 'desc' },
+          where: { deletedAt: null },
+          include: {
+            file: true,
+            reviewer: {
+              select: { id: true, name: true, email: true },
+            },
           },
         },
       },
@@ -208,5 +222,88 @@ export class EmployeeTaskRepository {
         },
       },
     }) as any;
+  }
+
+  // ── Acknowledgment gate ─────────────────────────────────────────────────
+
+  async acknowledge(id: string): Promise<Task> {
+    return prisma.task.update({
+      where: { id },
+      data: { acknowledgedAt: new Date() },
+    });
+  }
+
+  async findPendingAcknowledgment(employeeId: string): Promise<(Task & {
+    assigner: { id: string; name: string; email: string } | null;
+  })[]> {
+    return prisma.task.findMany({
+      where: {
+        assignedTo: employeeId,
+        taskType: TaskType.ADMIN_ASSIGNED,
+        acknowledgedAt: null,
+        isDeleted: false,
+        deletedAt: null,
+      },
+      include: {
+        assigner: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    }) as any;
+  }
+
+  // ── Completion submission (file review workflow) ────────────────────────
+
+  async getLatestSubmission(taskId: string): Promise<TaskSubmission | null> {
+    return prisma.taskSubmission.findFirst({
+      where: { taskId, deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createCompletionFile(data: {
+    taskId: string;
+    uploadedBy: string;
+    name: string;
+    fileUrl: string;
+    fileType: FileType;
+    sizeKb: number | null;
+  }): Promise<File> {
+    return prisma.file.create({
+      data: {
+        taskId: data.taskId,
+        uploadedBy: data.uploadedBy,
+        name: data.name,
+        fileUrl: data.fileUrl,
+        fileType: data.fileType,
+        sizeKb: data.sizeKb,
+      },
+    });
+  }
+
+  async createSubmission(data: {
+    taskId: string;
+    submittedBy: string;
+    fileId: string;
+    note: string | null;
+  }): Promise<TaskSubmission & { file: File | null }> {
+    return prisma.taskSubmission.create({
+      data: {
+        taskId: data.taskId,
+        submittedBy: data.submittedBy,
+        fileId: data.fileId,
+        note: data.note,
+      },
+      include: { file: true },
+    });
+  }
+
+  async markCompleted(id: string): Promise<Task> {
+    return prisma.task.update({
+      where: { id },
+      data: {
+        status: TaskStatus.completed,
+        completedAt: new Date(),
+      },
+    });
   }
 }
