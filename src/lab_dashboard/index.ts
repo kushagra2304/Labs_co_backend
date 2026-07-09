@@ -5,6 +5,7 @@ import calendarRoutes from './routes/calender.routes';
 import notificationRoutes from './routes/notification.routes';
 import taskRoutes from '../tasks/task.routes';
 import employeeTaskRoutes from '../employee_tasks/employee_task.routes';
+import taskSubmissionRoutes from '../task_submissions/task_submission.routes';
 import teamRoutes from '../team/team.routes';
 import teamSettingsRoutes from '../team_settings/team_settings.routes';
 import { UserController } from './controllers/user.controller';
@@ -19,6 +20,7 @@ router.use('/calendar', calendarRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/tasks', taskRoutes);
 router.use('/employee/tasks', employeeTaskRoutes);
+router.use('/task-submissions', taskSubmissionRoutes);
 router.use('/admin/employees', teamRoutes);
 router.use('/settings/team', teamSettingsRoutes);
 

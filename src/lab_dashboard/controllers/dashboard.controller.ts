@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import  prisma  from '../../prisma/client';
+import { TaskType } from '@prisma/client';
 import { publishActivity } from '../../helpers/notification.helper';
 
 const MONTH_LABELS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -136,8 +137,11 @@ export class DashboardController {
         prisma.file.count({
           where: { deletedAt: null, uploadedBy: userId, createdAt: { gte: startOfToday } }
         }),
+        // "Pending acknowledgment" now tracks the real acknowledgedAt gate
+        // (admin-assigned tasks only) rather than the legacy "pending" status,
+        // since a task can sit in status "pending" after being acknowledged too.
         prisma.task.count({
-          where: { deletedAt: null, assignedTo: userId, status: 'pending' }
+          where: { deletedAt: null, assignedTo: userId, taskType: TaskType.ADMIN_ASSIGNED, acknowledgedAt: null }
         })
       ]);
 

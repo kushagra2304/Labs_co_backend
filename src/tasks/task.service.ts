@@ -66,6 +66,11 @@ export class TaskService {
 
     await this.validateTaskData(data, true);
 
+    // A due-date change invalidates any previous "due soon" reminder — reset
+    // it so the deadline job can notify again if the new date re-enters the
+    // reminder window.
+    const dueDateChanged = data.dueDate !== undefined;
+
     return this.taskRepo.update(id, {
       ...(data.title !== undefined && { title: data.title.trim() }),
       ...(data.description !== undefined && { description: data.description.trim() }),
@@ -74,6 +79,7 @@ export class TaskService {
       ...(data.status !== undefined && { status: data.status.toLowerCase() as TaskStatus }),
       ...(data.dueDate !== undefined && { dueDate: data.dueDate ? new Date(data.dueDate) : null }),
       ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours }),
+      ...(dueDateChanged && { dueSoonNotifiedAt: null, overdueNotifiedAt: null }),
       actorId,
     });
   }
@@ -84,6 +90,24 @@ export class TaskService {
       throw new Error('Task not found');
     }
     return this.taskRepo.softDelete(id, actorId);
+  }
+
+  // Final admin sign-off. Deliberately separate from the employee marking a
+  // task "completed" and from a submitted file being accepted: an accepted
+  // file does not by itself close out the task, the admin must finalize it.
+  async finalizeTask(id: string, adminId: string): Promise<Task> {
+    const task = await this.taskRepo.findById(id);
+    if (!task) {
+      throw new Error('Task not found');
+    }
+    if (task.adminVerifiedAt) {
+      throw new Error('Task is already finalized');
+    }
+    const latestSubmission = await this.taskRepo.getLatestSubmission(id);
+    if (!latestSubmission || latestSubmission.status !== 'accepted') {
+      throw new Error('Task can only be finalized after its submitted file has been accepted');
+    }
+    return this.taskRepo.finalize(id, adminId);
   }
 
   private async validateTaskData(

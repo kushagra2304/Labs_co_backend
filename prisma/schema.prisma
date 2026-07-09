@@ -48,7 +48,14 @@ enum FileType {
   image
   pdf
   doc
+  dwg
   other
+}
+
+enum SubmissionStatus {
+  pending
+  accepted
+  declined
 }
 
 enum RewardType {
@@ -65,6 +72,12 @@ enum NotificationType {
   reward
   reminder
   message
+  task_ack_required
+  task_submission_review
+  task_submission_result
+  task_finalized
+  task_due_soon
+  task_overdue
 }
 
 enum ActionType {
@@ -148,6 +161,9 @@ model User {
   projectMemberships ProjectMember[]
   tasksAssigned      Task[]          @relation("TaskAssignedTo")
   tasksCreated        Task[]         @relation("TaskAssignedBy")
+  tasksVerified      Task[]          @relation("TaskVerifiedBy")
+  taskSubmissionsMade     TaskSubmission[] @relation("TaskSubmissionSubmitter")
+  taskSubmissionsReviewed TaskSubmission[] @relation("TaskSubmissionReviewer")
   taskUpdates        TaskUpdate[]
   workLogs           WorkLog[]
   activityLogs       ActivityLog[]
@@ -241,15 +257,60 @@ model Task {
   estimatedHours Int? @map("estimated_hours")
   taskType TaskType @default(ADMIN_ASSIGNED) @map("task_type")
 
+  // Acknowledgment gate: an ADMIN_ASSIGNED task cannot be started/updated by the
+  // employee until they acknowledge it. Null = not yet acknowledged.
+  acknowledgedAt DateTime? @map("acknowledged_at")
+
+  // Final admin sign-off, separate from the employee marking the task "completed"
+  // and separate from a submitted file being accepted/declined. Only an admin
+  // can set this, and only once there is an accepted TaskSubmission.
+  adminVerifiedAt DateTime? @map("admin_verified_at")
+  adminVerifiedBy String?   @map("admin_verified_by") @db.Uuid
+
+  // Deadline reminder bookkeeping — set once each notification has been sent
+  // so the periodic job doesn't re-notify on every run. Reset to null when
+  // the due date changes so reminders can fire again appropriately.
+  dueSoonNotifiedAt DateTime? @map("due_soon_notified_at")
+  overdueNotifiedAt DateTime? @map("overdue_notified_at")
+
   project  Project? @relation(fields: [projectId], references: [id])
   assignee User?    @relation("TaskAssignedTo", fields: [assignedTo], references: [id])
   assigner User?    @relation("TaskAssignedBy", fields: [assignedBy], references: [id])
+  verifier User?    @relation("TaskVerifiedBy", fields: [adminVerifiedBy], references: [id])
 
   taskUpdates TaskUpdate[]
   workLogs    WorkLog[]
   files       File[]
+  submissions TaskSubmission[]
 
   @@map("tasks")
+}
+
+// =========================================
+// TASK COMPLETION SUBMISSIONS (file review workflow)
+// =========================================
+
+model TaskSubmission {
+  id           String           @id @default(uuid()) @db.Uuid
+  taskId       String           @map("task_id") @db.Uuid
+  submittedBy  String           @map("submitted_by") @db.Uuid
+  fileId       String?          @unique @map("file_id") @db.Uuid
+  note         String?
+  status       SubmissionStatus @default(pending)
+  reviewedBy   String?          @map("reviewed_by") @db.Uuid
+  reviewedAt   DateTime?        @map("reviewed_at")
+  adminRemarks String?          @map("admin_remarks")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  task      Task  @relation(fields: [taskId], references: [id])
+  submitter User  @relation("TaskSubmissionSubmitter", fields: [submittedBy], references: [id])
+  reviewer  User? @relation("TaskSubmissionReviewer", fields: [reviewedBy], references: [id])
+  file      File? @relation(fields: [fileId], references: [id])
+
+  @@map("task_submissions")
 }
 
 model TaskUpdate {
@@ -316,9 +377,10 @@ model File {
   createdAt DateTime  @default(now()) @map("created_at")
   deletedAt DateTime? @map("deleted_at")
 
-  project  Project? @relation(fields: [projectId], references: [id])
-  task     Task?    @relation(fields: [taskId], references: [id])
-  uploader User?    @relation(fields: [uploadedBy], references: [id])
+  project    Project?        @relation(fields: [projectId], references: [id])
+  task       Task?           @relation(fields: [taskId], references: [id])
+  uploader   User?           @relation(fields: [uploadedBy], references: [id])
+  submission TaskSubmission?
 
   @@map("files")
 }

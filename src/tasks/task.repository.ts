@@ -207,6 +207,8 @@ export class TaskRepository {
       status?: TaskStatus;
       dueDate?: Date | null;
       estimatedHours?: number | null;
+      dueSoonNotifiedAt?: null;
+      overdueNotifiedAt?: null;
       actorId: string;
     }
   ): Promise<Task> {
@@ -220,6 +222,8 @@ export class TaskRepository {
         ...(data.status !== undefined && { status: data.status }),
         ...(data.dueDate !== undefined && { dueDate: data.dueDate }),
         ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours }),
+        ...(data.dueSoonNotifiedAt !== undefined && { dueSoonNotifiedAt: data.dueSoonNotifiedAt }),
+        ...(data.overdueNotifiedAt !== undefined && { overdueNotifiedAt: data.overdueNotifiedAt }),
         updatedBy: data.actorId,
       },
     });
@@ -232,6 +236,23 @@ export class TaskRepository {
         isDeleted: true,
         deletedAt: new Date(),
         deletedBy: actorId,
+      },
+    });
+  }
+
+  async getLatestSubmission(taskId: string) {
+    return prisma.taskSubmission.findFirst({
+      where: { taskId, deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async finalize(id: string, adminId: string): Promise<Task> {
+    return prisma.task.update({
+      where: { id },
+      data: {
+        adminVerifiedAt: new Date(),
+        adminVerifiedBy: adminId,
       },
     });
   }

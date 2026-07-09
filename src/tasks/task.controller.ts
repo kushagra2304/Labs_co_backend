@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { TaskService } from './task.service';
 import { TaskFilters } from './task.repository';
+import { publishActivity } from '../helpers/notification.helper';
 
 export class TaskController {
   constructor(private taskService = new TaskService()) {}
@@ -86,6 +87,20 @@ export class TaskController {
         actorId
       );
 
+      // Admin-assigned tasks need the employee to acknowledge them before
+      // work can start — surface that via the notification bell.
+      if (task.assignedTo) {
+        await publishActivity({
+          userId: task.assignedTo,
+          type: 'task_ack_required',
+          title: 'New task assigned',
+          body: `"${task.title}" was assigned to you and needs your acknowledgment before you can start.`,
+          relatedId: task.id,
+          relatedType: 'Task',
+          io: req.app.get('io'),
+        });
+      }
+
       res.status(201).json({
         success: true,
         data: task,
@@ -159,6 +174,38 @@ export class TaskController {
       res.status(status).json({
         success: false,
         error: error.message || 'Failed to delete task',
+      });
+    }
+  };
+
+  finalizeTask = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const id = String(req.params.id);
+      const adminId = req.user!.id;
+
+      const task = await this.taskService.finalizeTask(id, adminId);
+
+      if (task.assignedTo) {
+        await publishActivity({
+          userId: task.assignedTo,
+          type: 'task_finalized',
+          title: 'Task finalized',
+          body: `"${task.title}" has been reviewed and marked fully complete by the admin.`,
+          relatedId: task.id,
+          relatedType: 'Task',
+          io: req.app.get('io'),
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        data: task,
+      });
+    } catch (error: any) {
+      const status = error.message === 'Task not found' ? 404 : 400;
+      res.status(status).json({
+        success: false,
+        error: error.message || 'Failed to finalize task',
       });
     }
   };
