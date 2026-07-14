@@ -40,6 +40,22 @@ export class TaskController {
     }
   };
 
+  listDueSoon = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const withinDays = req.query.withinDays ? parseInt(String(req.query.withinDays), 10) : 3;
+      const tasks = await this.taskService.getDueSoonTasks(withinDays);
+      res.status(200).json({
+        success: true,
+        data: tasks,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error.message || 'Failed to fetch due/overdue tasks',
+      });
+    }
+  };
+
   getTask = async (req: Request, res: Response): Promise<void> => {
     try {
       const id = String(req.params.id);

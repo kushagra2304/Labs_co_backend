@@ -10,6 +10,9 @@ router.use(requireAuth);
 router.use(requireRole(['admin']));
 
 router.get('/', taskController.listTasks);
+// NOTE: this must stay above the `/:id` route below, otherwise Express would
+// match "due-soon" as an `:id` param instead.
+router.get('/due-soon', taskController.listDueSoon);
 router.get('/:id', taskController.getTask);
 router.post('/', taskController.createTask);
 router.put('/:id', taskController.updateTask);

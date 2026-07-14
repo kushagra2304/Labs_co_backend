@@ -251,6 +251,34 @@ export class EmployeeTaskRepository {
     }) as any;
   }
 
+  // Tasks (own admin-assigned + own personal) due within the next few days,
+  // or already overdue, that aren't completed yet — feeds the employee
+  // "Due / Overdue" reminder tab.
+  async findDueSoon(employeeId: string, withinDays: number): Promise<(Task & {
+    assigner: { id: string; name: string; email: string } | null;
+  })[]> {
+    const horizon = new Date();
+    horizon.setHours(23, 59, 59, 999);
+    horizon.setDate(horizon.getDate() + withinDays);
+
+    return prisma.task.findMany({
+      where: {
+        isDeleted: false,
+        deletedAt: null,
+        status: { notIn: [TaskStatus.completed] },
+        dueDate: { not: null, lte: horizon },
+        OR: [
+          { assignedTo: employeeId, taskType: TaskType.ADMIN_ASSIGNED },
+          { createdBy: employeeId, taskType: TaskType.PERSONAL },
+        ],
+      },
+      include: {
+        assigner: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { dueDate: 'asc' },
+    }) as any;
+  }
+
   // ── Completion submission (file review workflow) ────────────────────────
 
   async getLatestSubmission(taskId: string): Promise<TaskSubmission | null> {

@@ -168,6 +168,7 @@ model User {
   workLogs           WorkLog[]
   activityLogs       ActivityLog[]
   filesUploaded      File[]
+  filesKept          File[]          @relation("FileKeptBy")
   notifications      Notification[]
   rewardsReceived    Reward[]        @relation("RewardEmployee")
   rewardsGiven       Reward[]        @relation("RewardGivenBy")
@@ -374,12 +375,28 @@ model File {
   taskId     String?  @map("task_id") @db.Uuid
   uploadedBy String?  @map("uploaded_by") @db.Uuid
 
+  // R2 object key (e.g. "projects/<id>/2026/07/<uuid>.dwg"), stored separately
+  // from the public fileUrl so the auto-delete job and manual delete/zip
+  // actions can address the object directly without re-deriving it.
+  r2ObjectKey String? @map("r2_object_key")
+
+  // Project-files lifecycle: every project file gets a 30-day expiry from
+  // upload. The Files page surfaces a review banner for files with
+  // 1-5 days left (day 25-29 of the 30-day window), where an admin can keep
+  // or delete before the auto-delete job removes it. Null expiresAt means the
+  // file is exempt from auto-deletion (either never set — e.g. task
+  // completion files — or permanently kept via the review flow).
+  expiresAt DateTime? @map("expires_at")
+  keptAt    DateTime? @map("kept_at")
+  keptBy    String?   @map("kept_by") @db.Uuid
+
   createdAt DateTime  @default(now()) @map("created_at")
   deletedAt DateTime? @map("deleted_at")
 
   project    Project?        @relation(fields: [projectId], references: [id])
   task       Task?           @relation(fields: [taskId], references: [id])
   uploader   User?           @relation(fields: [uploadedBy], references: [id])
+  keeper     User?           @relation("FileKeptBy", fields: [keptBy], references: [id])
   submission TaskSubmission?
 
   @@map("files")
@@ -541,6 +558,9 @@ model Attendance {
   workingHours  Decimal?  @map("working_hours")
   breakDuration Decimal?  @map("break_duration")
   overtime      Decimal?  @map("overtime")
+  // Only meaningful when status === 'Leave'. true = counted against the
+  // monthly paid-leave quota, false = approved but over-quota (unpaid).
+  isPaidLeave   Boolean?  @map("is_paid_leave")
   source        String?
   wifiUsed      String?   @map("wifi_used")
   officeName    String?   @map("office_name")
@@ -571,6 +591,10 @@ model AttendanceRequest {
   userId       String    @map("user_id") @db.Uuid
   date         DateTime  @db.Date
   status       String    @default("pending") // pending, approved, rejected
+  // 'LEAVE' (uses the monthly paid-leave quota) or 'REMOTE' (worked, just not
+  // from an approved office WiFi network). Defaults to REMOTE for rows
+  // created before this field existed.
+  requestType  String    @default("REMOTE") @map("request_type")
   reason       String
   notes        String?
   adminRemarks String?   @map("admin_remarks")
@@ -641,7 +665,12 @@ model AttendancePolicy {
   maximumWorkingHours Float    @default(12.0) @map("maximum_working_hours")
   overtimeRules       String?  @map("overtime_rules")
   autoCheckout        Boolean  @default(true) @map("auto_checkout")
-  workingDays         String   @default("1,2,3,4,5") @map("working_days") // 1=Mon, 7=Sun
+  // Every day is a working day by default (no automatic weekends/Sundays off)
+  // — time off only happens through the monthly leave quota below.
+  workingDays         String   @default("1,2,3,4,5,6,7") @map("working_days") // 1=Mon, 7=Sun
+  // How many paid leave days an employee gets per calendar month. Approved
+  // leave requests beyond this count are still approved but marked unpaid.
+  monthlyLeaveQuota    Int     @default(4) @map("monthly_leave_quota")
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")

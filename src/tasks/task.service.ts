@@ -20,6 +20,12 @@ export class TaskService {
     return task;
   }
 
+  // Tasks due within the next few days (default 3), or already overdue,
+  // that aren't completed yet — feeds the admin "Due / Overdue" tab.
+  async getDueSoonTasks(withinDays = 3) {
+    return this.taskRepo.findDueSoon(withinDays);
+  }
+
   async createTask(
     data: {
       title: string;

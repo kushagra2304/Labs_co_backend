@@ -12,6 +12,7 @@ router.use(requireAuth);
 // NOTE: this must stay above the `/:id` route below, otherwise Express would
 // match "pending-acknowledgment" as an `:id` param instead.
 router.get('/pending-acknowledgment', controller.listPendingAcknowledgment);
+router.get('/due-soon', controller.listDueSoon);
 
 router.get('/', controller.listTasks);
 router.get('/:id', controller.getTask);

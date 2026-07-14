@@ -19,7 +19,10 @@ export class AttendanceRepository {
           minimumWorkingHours: 8.0,
           maximumWorkingHours: 12.0,
           autoCheckout: true,
-          workingDays: '1,2,3,4,5',
+          // No automatic weekends/Sundays off — every day is a working day
+          // by default. Time off only happens via the monthly leave quota.
+          workingDays: '1,2,3,4,5,6,7',
+          monthlyLeaveQuota: 4,
         },
       });
     }
@@ -183,6 +186,21 @@ export class AttendanceRepository {
 
   async createAttendance(data: Prisma.AttendanceCreateInput) {
     return prisma.attendance.create({ data });
+  }
+
+  // Count how many *paid* leave days a user already has recorded within a
+  // given month — used to enforce the monthly leave quota when approving a
+  // new leave request.
+  async countPaidLeavesInMonth(userId: string, startOfMonth: Date, endOfMonth: Date) {
+    return prisma.attendance.count({
+      where: {
+        userId,
+        status: 'Leave',
+        isPaidLeave: true,
+        date: { gte: startOfMonth, lte: endOfMonth },
+        deletedAt: null,
+      },
+    });
   }
 
   async updateAttendance(id: string, data: Prisma.AttendanceUpdateInput) {
