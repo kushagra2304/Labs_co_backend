@@ -256,4 +256,43 @@ export class TaskRepository {
       },
     });
   }
+
+  // Tasks due within the next few days, or already past their due date, that
+  // aren't finished yet — surfaced on the admin "Due / Overdue" tab so admins
+  // can see at a glance who needs a nudge and who's already late.
+  async findDueSoon(withinDays: number): Promise<(Task & {
+    assignee: { id: string; name: string; email: string; avatarUrl: string | null } | null;
+    assigner: { id: string; name: string; email: string } | null;
+  })[]> {
+    const horizon = new Date();
+    horizon.setHours(23, 59, 59, 999);
+    horizon.setDate(horizon.getDate() + withinDays);
+
+    return prisma.task.findMany({
+      where: {
+        isDeleted: false,
+        deletedAt: null,
+        status: { notIn: [TaskStatus.completed] },
+        dueDate: { not: null, lte: horizon },
+      },
+      orderBy: { dueDate: 'asc' },
+      include: {
+        assignee: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+        assigner: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+    }) as any;
+  }
 }

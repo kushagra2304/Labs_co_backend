@@ -250,6 +250,12 @@ export class EmployeeTaskService {
     return this.employeeTaskRepo.findPendingAcknowledgment(employeeId);
   }
 
+  // Own tasks due within the next few days (default 3), or already overdue,
+  // that aren't completed yet — feeds the "Due / Overdue" reminder tab.
+  async getDueSoonTasks(employeeId: string, withinDays = 3) {
+    return this.employeeTaskRepo.findDueSoon(employeeId, withinDays);
+  }
+
   // ── Completion submission (file review workflow) ────────────────────────
 
   async submitCompletion(
