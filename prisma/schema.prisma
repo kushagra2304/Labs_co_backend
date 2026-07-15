@@ -194,6 +194,7 @@ model User {
 model Project {
   id              String        @id @default(uuid()) @db.Uuid
   name            String
+  client          String?
   description     String?
   status          ProjectStatus @default(in_progress)
   priority        Priority      @default(medium)

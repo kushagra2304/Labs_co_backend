@@ -30,15 +30,29 @@ export class DashboardController {
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const where = { deletedAt: null as null };
 
-    const [total, completed, thisMonthTotal, lastMonthTotal, thisMonthCompleted, lastMonthCompleted] =
-      await Promise.all([
-        prisma.project.count({ where }),
-        prisma.project.count({ where: { ...where, status: "completed" } }),
-        prisma.project.count({ where: { ...where, createdAt: { gte: startOfThisMonth } } }),
-        prisma.project.count({ where: { ...where, createdAt: { gte: startOfLastMonth, lt: startOfThisMonth } } }),
-        prisma.project.count({ where: { ...where, status: "completed", updatedAt: { gte: startOfThisMonth } } }),
-        prisma.project.count({ where: { ...where, status: "completed", updatedAt: { gte: startOfLastMonth, lt: startOfThisMonth } } }),
-      ]);
+    const [
+      total,
+      completed,
+      thisMonthTotal,
+      lastMonthTotal,
+      thisMonthCompleted,
+      lastMonthCompleted,
+      thisMonthPending,
+      lastMonthPending,
+    ] = await Promise.all([
+      prisma.project.count({ where }),
+      prisma.project.count({ where: { ...where, status: "completed" } }),
+      prisma.project.count({ where: { ...where, createdAt: { gte: startOfThisMonth } } }),
+      prisma.project.count({ where: { ...where, createdAt: { gte: startOfLastMonth, lt: startOfThisMonth } } }),
+      prisma.project.count({ where: { ...where, status: "completed", updatedAt: { gte: startOfThisMonth } } }),
+      prisma.project.count({ where: { ...where, status: "completed", updatedAt: { gte: startOfLastMonth, lt: startOfThisMonth } } }),
+      // Pending = created this/last month and still not completed — mirrors
+      // the totalProjects comparison above (new-per-month), just scoped to
+      // the not-yet-completed subset so the trend is meaningful instead of
+      // comparing `pending` against itself (which always produced 0%).
+      prisma.project.count({ where: { ...where, status: { not: "completed" }, createdAt: { gte: startOfThisMonth } } }),
+      prisma.project.count({ where: { ...where, status: { not: "completed" }, createdAt: { gte: startOfLastMonth, lt: startOfThisMonth } } }),
+    ]);
 
     const pending = total - completed;
     const pctChange = (curr: number, prev: number) =>
@@ -50,7 +64,7 @@ export class DashboardController {
       completed,
       completedChangePct: pctChange(thisMonthCompleted, lastMonthCompleted),
       pending,
-      pendingChangePct: pctChange(pending, total - completed),
+      pendingChangePct: pctChange(thisMonthPending, lastMonthPending),
     });
   };
 
@@ -276,30 +290,88 @@ export class DashboardController {
     }
   };
 
+  // Real points/rank/badges — replaces the old version of this endpoint which
+  // just auto-seeded 3 fake demo rows on first call ("Runner-up Jun" etc. were
+  // literal hardcoded strings, not earned). Everything below is derived from
+  // actual task/file activity; nothing is fabricated. The `Reward` table
+  // itself is left in place as a hook for a future admin "give a reward"
+  // feature — it's just no longer auto-populated with fake rows.
   getEmployeeRewards = async (req: Request, res: Response) => {
     try {
       const userId = req.user!.id;
-      let rewards = await prisma.reward.findMany({
-        where: { employeeId: userId },
-        orderBy: { createdAt: 'desc' }
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthLabel = now.toLocaleDateString("en-US", { month: "short" });
+
+      const POINTS_PER_TASK = 100;
+
+      const [completedTasks, completedThisMonth, uploadsThisMonth] = await Promise.all([
+        prisma.task.count({ where: { deletedAt: null, assignedTo: userId, status: 'completed' } }),
+        prisma.task.count({ where: { deletedAt: null, assignedTo: userId, status: 'completed', completedAt: { gte: startOfMonth } } }),
+        prisma.file.count({ where: { deletedAt: null, uploadedBy: userId, createdAt: { gte: startOfMonth } } }),
+      ]);
+
+      // Rank this month among real employees, ranked by tasks completed this
+      // month (a fair, comparable metric — raw points is just this * 100).
+      const employees = await prisma.user.findMany({
+        where: { role: 'employee', deletedAt: null, isActive: true },
+        select: { id: true },
       });
+      const monthlyCompletions = await Promise.all(
+        employees.map((e) =>
+          prisma.task.count({
+            where: { deletedAt: null, assignedTo: e.id, status: 'completed', completedAt: { gte: startOfMonth } },
+          }).then((count) => ({ id: e.id, count }))
+        )
+      );
+      monthlyCompletions.sort((a, b) => b.count - a.count);
+      const rank = monthlyCompletions.findIndex((e) => e.id === userId) + 1 || monthlyCompletions.length + 1;
+      const totalEmployees = employees.length;
 
-      // If no rewards, seed initial ones for demo/wow factor!
-      if (rewards.length === 0) {
-        await prisma.reward.createMany({
-          data: [
-            { employeeId: userId, type: 'badge', message: 'Runner-up Jun', createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) },
-            { employeeId: userId, type: 'star', message: 'Fast May', createdAt: new Date(Date.now() - 35 * 24 * 60 * 60 * 1000) },
-            { employeeId: userId, type: 'appreciation', message: 'Uploader Apr', createdAt: new Date(Date.now() - 65 * 24 * 60 * 60 * 1000) }
-          ]
-        });
-        rewards = await prisma.reward.findMany({
-          where: { employeeId: userId },
-          orderBy: { createdAt: 'desc' }
-        });
-      }
+      // "Fast Finisher" = completed a task at least a day ahead of its due
+      // date, this month — a real per-task check (completedAt vs dueDate).
+      const fastFinishTasks = await prisma.task.findMany({
+        where: {
+          deletedAt: null,
+          assignedTo: userId,
+          status: 'completed',
+          completedAt: { gte: startOfMonth },
+          dueDate: { not: null },
+        },
+        select: { completedAt: true, dueDate: true },
+      });
+      const fastFinishCount = fastFinishTasks.filter(
+        (t) => t.completedAt && t.dueDate && t.completedAt.getTime() <= t.dueDate.getTime() - 24 * 60 * 60 * 1000
+      ).length;
 
-      res.json(rewards);
+      const points = completedTasks * POINTS_PER_TASK;
+      const monthlyPoints = completedThisMonth * POINTS_PER_TASK;
+      const targetPoints = 1500;
+
+      const badges = [
+        {
+          id: 'rank',
+          label: rank === 1 ? `Top Performer ${monthLabel}` : rank === 2 ? `Runner-up ${monthLabel}` : `Rank #${rank} ${monthLabel}`,
+          achieved: rank <= 2 && totalEmployees > 1,
+        },
+        {
+          id: 'speed',
+          label: `Fast Finisher ${monthLabel}`,
+          achieved: fastFinishCount > 0,
+        },
+        {
+          id: 'uploader',
+          label: `Uploader ${monthLabel}`,
+          achieved: uploadsThisMonth >= 5,
+        },
+        {
+          id: 'consistency',
+          label: `On a Roll ${monthLabel}`,
+          achieved: completedThisMonth >= 3,
+        },
+      ];
+
+      res.json({ points, monthlyPoints, targetPoints, rank, totalEmployees, badges });
       return;
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to fetch rewards" });
