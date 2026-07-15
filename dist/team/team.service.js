@@ -180,6 +180,15 @@ class TeamService {
             const lName = data.lastName !== undefined ? data.lastName.trim() : existingParts.slice(1).join(' ') || '';
             name = `${fName} ${lName}`;
         }
+        if (data.isActive !== undefined && data.isActive !== existing.isActive) {
+            await client_2.default.auditLog.create({
+                data: {
+                    userId: existing.id,
+                    action: data.isActive ? 'Activated' : 'Deactivated',
+                    details: `Account ${data.isActive ? 'activated' : 'deactivated'} by admin ID ${actorId}. Internal Employee ID: ${existing.employeeId || 'N/A'}.`,
+                }
+            });
+        }
         return this.teamRepo.update(id, {
             name,
             ...(data.email !== undefined && {

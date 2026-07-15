@@ -184,6 +184,9 @@ model User {
   attendanceNotifications AttendanceNotification[]
   auditLogs              AuditLog[]
 
+  taskAssignments         TaskAssignment[] @relation("EmployeeTaskAssignments")
+  assignedTaskAssignments TaskAssignment[] @relation("AssignerTaskAssignments")
+
   @@map("users")
 }
 
@@ -283,6 +286,7 @@ model Task {
   taskUpdates TaskUpdate[]
   workLogs    WorkLog[]
   files       File[]
+  assignments TaskAssignment[]
   submissions TaskSubmission[]
 
   @@map("tasks")
@@ -495,6 +499,8 @@ model Message {
   updatedBy String?   @map("updated_by")
   deletedAt DateTime? @map("deleted_at")
   deletedBy String?   @map("deleted_by")
+  isEdited  Boolean   @default(false) @map("is_edited")
+  editedAt  DateTime? @map("edited_at")
 
   conversation Conversation        @relation(fields: [conversationId], references: [id])
   sender       User                @relation(fields: [senderId], references: [id])
@@ -775,5 +781,20 @@ model TeamFeatureSetting {
   updatedAt  DateTime @updatedAt @map("updated_at")
 
   @@map("team_feature_settings")
+}
+
+model TaskAssignment {
+  id         String   @id @default(uuid()) @db.Uuid
+  taskId     String   @map("task_id") @db.Uuid
+  employeeId String   @map("employee_id") @db.Uuid
+  assignedAt DateTime @default(now()) @map("assigned_at")
+  assignedBy String?  @map("assigned_by") @db.Uuid
+
+  task     Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  employee User  @relation("EmployeeTaskAssignments", fields: [employeeId], references: [id], onDelete: Cascade)
+  assigner User? @relation("AssignerTaskAssignments", fields: [assignedBy], references: [id])
+
+  @@unique([taskId, employeeId])
+  @@map("task_assignments")
 }
 

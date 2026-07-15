@@ -6,6 +6,7 @@ const conversation_member_repository_1 = require("../repositories/conversation-m
 const message_attachment_repository_1 = require("../repositories/message-attachment.repository");
 const message_reaction_repository_1 = require("../repositories/message-reaction.repository");
 const media_service_1 = require("./media.service");
+const conversation_authorization_service_1 = require("./conversation-authorization.service");
 class MessageService {
     messageRepo;
     memberRepo;
@@ -20,16 +21,16 @@ class MessageService {
         this.mediaService = mediaService;
     }
     async getConversationMessages(conversationId, userId, page, limit) {
-        const member = await this.memberRepo.findByConversationAndUser(conversationId, userId);
-        if (!member) {
+        const isAuth = await conversation_authorization_service_1.ConversationAuthorizationService.isAuthorized(conversationId, userId);
+        if (!isAuth) {
             throw new Error('You are not a member of this conversation');
         }
         const offset = (page - 1) * limit;
         return this.messageRepo.findConversationMessages(conversationId, limit, offset, true);
     }
     async sendMessage(data) {
-        const member = await this.memberRepo.findByConversationAndUser(data.conversationId, data.senderId);
-        if (!member) {
+        const isAuth = await conversation_authorization_service_1.ConversationAuthorizationService.isAuthorized(data.conversationId, data.senderId);
+        if (!isAuth) {
             throw new Error('Sender is not a member of the conversation');
         }
         if (data.replyToId) {
@@ -76,8 +77,8 @@ class MessageService {
         if (!message) {
             throw new Error('Message not found');
         }
-        const member = await this.memberRepo.findByConversationAndUser(message.conversationId, userId);
-        if (!member) {
+        const isAuth = await conversation_authorization_service_1.ConversationAuthorizationService.isAuthorized(message.conversationId, userId);
+        if (!isAuth) {
             throw new Error('You must be a member of the conversation to react');
         }
         const reaction = await this.reactionRepo.createOrRestore(messageId, userId, emoji, userId);

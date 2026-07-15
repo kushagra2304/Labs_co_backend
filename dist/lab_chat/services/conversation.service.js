@@ -1,9 +1,13 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ConversationService = void 0;
 const conversation_repository_1 = require("../repositories/conversation.repository");
 const user_repository_1 = require("../../helpers/user.repository");
 const conversation_member_repository_1 = require("../repositories/conversation-member.repository");
+const client_1 = __importDefault(require("../../prisma/client"));
 class ConversationService {
     conversationRepo;
     userRepo;
@@ -13,7 +17,22 @@ class ConversationService {
     }
     async getConversations(userId, page, limit) {
         const offset = (page - 1) * limit;
-        return this.conversationRepo.findUserConversations(userId, limit, offset);
+        const conversations = await this.conversationRepo.findUserConversations(userId, limit, offset);
+        const conversationsWithUnread = await Promise.all(conversations.map(async (conv) => {
+            const unreadCount = await client_1.default.message.count({
+                where: {
+                    conversationId: conv.id,
+                    senderId: { not: userId },
+                    status: { not: 'READ' },
+                    deletedAt: null,
+                },
+            });
+            return {
+                ...conv,
+                unreadCount,
+            };
+        }));
+        return conversationsWithUnread;
     }
     async createOrGetDirectConversation(userId, targetUserId) {
         if (userId === targetUserId) {

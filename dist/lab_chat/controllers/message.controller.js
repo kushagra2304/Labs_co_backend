@@ -29,6 +29,8 @@ class MessageController {
                     content,
                     conversationId,
                     updatedAt: message.updatedAt,
+                    isEdited: message.isEdited,
+                    editedAt: message.editedAt,
                 });
                 // Query members to emit to their personal rooms
                 const members = await client_1.default.conversationMember.findMany({
@@ -41,6 +43,8 @@ class MessageController {
                         content,
                         conversationId,
                         updatedAt: message.updatedAt,
+                        isEdited: message.isEdited,
+                        editedAt: message.editedAt,
                     });
                 }
             }
@@ -172,6 +176,30 @@ class MessageController {
                 success: false,
                 error: error.message || 'Failed to delete reaction',
             });
+        }
+    };
+    getUnreadCount = async (req, res) => {
+        try {
+            const userId = req.user.id;
+            const unreadCount = await client_1.default.message.count({
+                where: {
+                    senderId: { not: userId },
+                    status: { not: 'READ' },
+                    deletedAt: null,
+                    conversation: {
+                        members: {
+                            some: {
+                                userId,
+                                deletedAt: null,
+                            },
+                        },
+                    },
+                },
+            });
+            res.status(200).json({ success: true, count: unreadCount });
+        }
+        catch (error) {
+            res.status(500).json({ success: false, error: error.message || 'Failed to fetch unread count' });
         }
     };
 }

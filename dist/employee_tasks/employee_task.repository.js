@@ -41,6 +41,16 @@ class EmployeeTaskRepository {
                         email: true,
                     },
                 },
+                submissions: {
+                    orderBy: { createdAt: 'desc' },
+                    where: { deletedAt: null },
+                    include: {
+                        file: true,
+                        reviewer: {
+                            select: { id: true, name: true, email: true },
+                        },
+                    },
+                },
             },
         });
     }
@@ -164,6 +174,91 @@ class EmployeeTaskRepository {
                         email: true,
                     },
                 },
+            },
+        });
+    }
+    // ── Acknowledgment gate ─────────────────────────────────────────────────
+    async acknowledge(id) {
+        return client_1.default.task.update({
+            where: { id },
+            data: { acknowledgedAt: new Date() },
+        });
+    }
+    async findPendingAcknowledgment(employeeId) {
+        return client_1.default.task.findMany({
+            where: {
+                assignedTo: employeeId,
+                taskType: client_2.TaskType.ADMIN_ASSIGNED,
+                acknowledgedAt: null,
+                isDeleted: false,
+                deletedAt: null,
+            },
+            include: {
+                assigner: { select: { id: true, name: true, email: true } },
+            },
+            orderBy: { createdAt: 'asc' },
+        });
+    }
+    // Tasks (own admin-assigned + own personal) due within the next few days,
+    // or already overdue, that aren't completed yet — feeds the employee
+    // "Due / Overdue" reminder tab.
+    async findDueSoon(employeeId, withinDays) {
+        const horizon = new Date();
+        horizon.setHours(23, 59, 59, 999);
+        horizon.setDate(horizon.getDate() + withinDays);
+        return client_1.default.task.findMany({
+            where: {
+                isDeleted: false,
+                deletedAt: null,
+                status: { notIn: [client_2.TaskStatus.completed] },
+                dueDate: { not: null, lte: horizon },
+                OR: [
+                    { assignedTo: employeeId, taskType: client_2.TaskType.ADMIN_ASSIGNED },
+                    { createdBy: employeeId, taskType: client_2.TaskType.PERSONAL },
+                ],
+            },
+            include: {
+                assigner: { select: { id: true, name: true, email: true } },
+            },
+            orderBy: { dueDate: 'asc' },
+        });
+    }
+    // ── Completion submission (file review workflow) ────────────────────────
+    async getLatestSubmission(taskId) {
+        return client_1.default.taskSubmission.findFirst({
+            where: { taskId, deletedAt: null },
+            orderBy: { createdAt: 'desc' },
+        });
+    }
+    async createCompletionFile(data) {
+        return client_1.default.file.create({
+            data: {
+                taskId: data.taskId,
+                uploadedBy: data.uploadedBy,
+                name: data.name,
+                fileUrl: data.fileUrl,
+                fileType: data.fileType,
+                sizeKb: data.sizeKb,
+            },
+        });
+    }
+    async createSubmission(data) {
+        return client_1.default.taskSubmission.create({
+            data: {
+                taskId: data.taskId,
+                submittedBy: data.submittedBy,
+                fileId: data.fileId,
+                note: data.note,
+            },
+            include: { file: true },
+        });
+    }
+    async markCompleted(id) {
+        return client_1.default.task.update({
+            where: { id },
+            data: {
+                status: client_2.TaskStatus.completed,
+                completedAt: new Date(),
             },
         });
     }

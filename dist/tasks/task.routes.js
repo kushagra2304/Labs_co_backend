@@ -9,8 +9,12 @@ const taskController = new task_controller_1.TaskController();
 router.use(require_auth_middleware_1.requireAuth);
 router.use((0, require_auth_middleware_1.requireRole)(['admin']));
 router.get('/', taskController.listTasks);
+// NOTE: this must stay above the `/:id` route below, otherwise Express would
+// match "due-soon" as an `:id` param instead.
+router.get('/due-soon', taskController.listDueSoon);
 router.get('/:id', taskController.getTask);
 router.post('/', taskController.createTask);
 router.put('/:id', taskController.updateTask);
 router.delete('/:id', taskController.deleteTask);
+router.post('/:id/finalize', taskController.finalizeTask);
 exports.default = router;

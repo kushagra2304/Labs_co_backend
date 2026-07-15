@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UserController = void 0;
 const user_repository_1 = require("../../helpers/user.repository");
+const presence_service_1 = require("../services/presence.service");
 class UserController {
     userRepo;
     constructor(userRepo = new user_repository_1.UserRepository()) {
@@ -15,11 +16,19 @@ class UserController {
                 return;
             }
             const users = await this.userRepo.findActiveEmployeesExcept(currentUserId);
-            // Return user array directly containing only id, name, and email
-            const formattedUsers = users.map((user) => ({
-                id: user.id,
-                name: user.name,
-                email: user.email,
+            const presenceService = new presence_service_1.PresenceService();
+            const formattedUsers = await Promise.all(users.map(async (user) => {
+                const isOnline = await presenceService.isUserOnline(user.id);
+                return {
+                    id: user.id,
+                    name: user.name,
+                    email: user.email,
+                    avatarUrl: user.avatarUrl || null,
+                    role: user.role,
+                    isActive: user.isActive,
+                    lastSeen: user.lastSeen,
+                    isOnline,
+                };
             }));
             res.status(200).json(formattedUsers);
         }

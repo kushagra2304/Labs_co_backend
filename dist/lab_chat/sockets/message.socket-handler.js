@@ -5,12 +5,42 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleMessageEvents = void 0;
 const client_1 = __importDefault(require("../../prisma/client"));
+const conversation_authorization_service_1 = require("../services/conversation-authorization.service");
 const handleMessageEvents = (io, socket, messageService) => {
     const userId = socket.data.user.id;
+    const emitUnreadCount = async (targetUserId) => {
+        try {
+            const count = await client_1.default.message.count({
+                where: {
+                    senderId: { not: targetUserId },
+                    status: { not: 'READ' },
+                    deletedAt: null,
+                    conversation: {
+                        members: {
+                            some: {
+                                userId: targetUserId,
+                                deletedAt: null,
+                            },
+                        },
+                    },
+                },
+            });
+            io.to(targetUserId).emit('unread_count_update', { count });
+        }
+        catch (error) {
+            console.error(`Failed to emit unread count update for user ${targetUserId}:`, error);
+        }
+    };
     socket.on('send_message', async ({ conversationId, content, type, replyToId, tempId }) => {
         try {
             if (!conversationId) {
                 socket.emit('error', { message: 'conversationId is required' });
+                return;
+            }
+            const isAuth = await conversation_authorization_service_1.ConversationAuthorizationService.isAuthorized(conversationId, userId);
+            if (!isAuth) {
+                console.warn(`[SECURITY] Unauthorized send_message attempt by user ${userId} on conversation ${conversationId}`);
+                socket.emit('error', { message: 'Unauthorized: You do not have access to this conversation.' });
                 return;
             }
             const message = await messageService.sendMessage({
@@ -47,6 +77,7 @@ const handleMessageEvents = (io, socket, messageService) => {
                         conversationId,
                         tempId,
                     });
+                    await emitUnreadCount(member.userId);
                 }
             }
             // ACK back to sender first (SENT)
@@ -83,6 +114,18 @@ const handleMessageEvents = (io, socket, messageService) => {
         try {
             if (!messageId || !conversationId)
                 return;
+            const isAuth = await conversation_authorization_service_1.ConversationAuthorizationService.isAuthorized(conversationId, userId);
+            if (!isAuth) {
+                console.warn(`[SECURITY] Unauthorized message_read attempt by user ${userId} on conversation ${conversationId}`);
+                socket.emit('error', { message: 'Unauthorized: You do not have access to this conversation.' });
+                return;
+            }
+            const isMsgAuth = await conversation_authorization_service_1.ConversationAuthorizationService.isMessageAuthorized(messageId, userId);
+            if (!isMsgAuth) {
+                console.warn(`[SECURITY] Unauthorized message_read attempt by user ${userId} on message ${messageId}`);
+                socket.emit('error', { message: 'Unauthorized: Message does not belong to your conversation.' });
+                return;
+            }
             const result = await messageService.markAsRead(messageId, userId);
             // Notify the sender that the message has been read
             io.to(result.senderId).emit('read_receipt', {
@@ -90,6 +133,7 @@ const handleMessageEvents = (io, socket, messageService) => {
                 conversationId,
                 userId,
             });
+            await emitUnreadCount(userId);
         }
         catch (error) {
             console.error('Socket message_read error:', error);
@@ -99,6 +143,12 @@ const handleMessageEvents = (io, socket, messageService) => {
         try {
             if (!conversationId)
                 return;
+            const isAuth = await conversation_authorization_service_1.ConversationAuthorizationService.isAuthorized(conversationId, userId);
+            if (!isAuth) {
+                console.warn(`[SECURITY] Unauthorized conversation_read attempt by user ${userId} on conversation ${conversationId}`);
+                socket.emit('error', { message: 'Unauthorized: You do not have access to this conversation.' });
+                return;
+            }
             const updatedMessages = await messageService.markConversationAsRead(conversationId, userId);
             for (const msg of updatedMessages) {
                 io.to(msg.senderId).emit('read_receipt', {
@@ -107,6 +157,7 @@ const handleMessageEvents = (io, socket, messageService) => {
                     userId,
                 });
             }
+            await emitUnreadCount(userId);
         }
         catch (error) {
             console.error('Socket conversation_read error:', error);

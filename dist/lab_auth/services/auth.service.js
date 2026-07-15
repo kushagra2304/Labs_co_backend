@@ -40,7 +40,7 @@ const loginUser = async (email, password) => {
         throw { status: 401, message: "Invalid email or password" };
     }
     if (!user.isActive) {
-        throw { status: 403, message: "Account is deactivated" };
+        throw { status: 403, message: "Your account has been deactivated. Please contact your administrator for assistance." };
     }
     const token = (0, jwt_util_1.signToken)({ userId: user.id, role: user.role });
     return {

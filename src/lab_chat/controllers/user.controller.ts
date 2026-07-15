@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { UserRepository } from '../../helpers/user.repository';
+import { PresenceService } from '../services/presence.service';
 
 export class UserController {
   constructor(private userRepo = new UserRepository()) {}
@@ -13,13 +14,23 @@ export class UserController {
       }
 
       const users = await this.userRepo.findActiveEmployeesExcept(currentUserId);
+      const presenceService = new PresenceService();
 
-      // Return user array directly containing only id, name, and email
-      const formattedUsers = users.map((user) => ({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-      }));
+      const formattedUsers = await Promise.all(
+        users.map(async (user) => {
+          const isOnline = await presenceService.isUserOnline(user.id);
+          return {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            avatarUrl: user.avatarUrl || null,
+            role: user.role,
+            isActive: user.isActive,
+            lastSeen: user.lastSeen,
+            isOnline,
+          };
+        })
+      );
 
       res.status(200).json(formattedUsers);
     } catch (error: any) {

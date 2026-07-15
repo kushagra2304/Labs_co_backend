@@ -17,7 +17,9 @@ export interface TaskFilters {
 export interface PaginatedTasks {
   tasks: (Task & {
     assignee: { id: string; name: string; email: string; avatarUrl: string | null } | null;
+    assignees: { id: string; name: string; email: string; avatarUrl: string | null }[];
     assigner: { id: string; name: string; email: string } | null;
+    project: { id: string; name: string; client: string | null } | null;
   })[];
   total: number;
   page: number;
@@ -27,23 +29,17 @@ export interface PaginatedTasks {
 export class TaskRepository {
   async findById(id: string): Promise<(Task & {
     assignee: { id: string; name: string; email: string; avatarUrl: string | null } | null;
+    assignees: { id: string; name: string; email: string; avatarUrl: string | null }[];
     assigner: { id: string; name: string; email: string } | null;
+    project: { id: string; name: string; client: string | null } | null;
   }) | null> {
-    return prisma.task.findFirst({
+    const task = await prisma.task.findFirst({
       where: {
         id,
         isDeleted: false,
         deletedAt: null,
       },
       include: {
-        assignee: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            avatarUrl: true,
-          },
-        },
         assigner: {
           select: {
             id: true,
@@ -51,8 +47,36 @@ export class TaskRepository {
             email: true,
           },
         },
+        project: {
+          select: {
+            id: true,
+            name: true,
+            client: true,
+          },
+        },
+        assignments: {
+          include: {
+            employee: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
       },
-    }) as any;
+    });
+
+    if (!task) return null;
+
+    const assignees = (task.assignments ?? []).map((a: any) => a.employee);
+    return {
+      ...task,
+      assignees,
+      assignee: assignees.length > 0 ? assignees[0] : null,
+    } as any;
   }
 
   async findAll(filters: TaskFilters): Promise<PaginatedTasks> {
@@ -142,19 +166,30 @@ export class TaskRepository {
         skip,
         take: limit,
         include: {
-          assignee: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              avatarUrl: true,
-            },
-          },
           assigner: {
             select: {
               id: true,
               name: true,
               email: true,
+            },
+          },
+          project: {
+            select: {
+              id: true,
+              name: true,
+              client: true,
+            },
+          },
+          assignments: {
+            include: {
+              employee: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  avatarUrl: true,
+                },
+              },
             },
           },
         },
@@ -164,8 +199,17 @@ export class TaskRepository {
       }),
     ]);
 
+    const mappedTasks = tasks.map((t: any) => {
+      const assignees = (t.assignments ?? []).map((a: any) => a.employee);
+      return {
+        ...t,
+        assignees,
+        assignee: assignees.length > 0 ? assignees[0] : null,
+      };
+    });
+
     return {
-      tasks: tasks as any,
+      tasks: mappedTasks as any,
       total,
       page,
       limit,
@@ -180,9 +224,11 @@ export class TaskRepository {
     status: TaskStatus;
     dueDate: Date | null;
     estimatedHours: number | null;
+    projectId?: string | null;
+    employeeIds: string[];
     actorId: string;
   }): Promise<Task> {
-    return prisma.task.create({
+    const task = await prisma.task.create({
       data: {
         title: data.title,
         description: data.description,
@@ -191,10 +237,23 @@ export class TaskRepository {
         status: data.status,
         dueDate: data.dueDate,
         estimatedHours: data.estimatedHours,
+        projectId: data.projectId,
         assignedBy: data.actorId,
         createdBy: data.actorId,
       },
     });
+
+    if (data.employeeIds && data.employeeIds.length > 0) {
+      await prisma.taskAssignment.createMany({
+        data: data.employeeIds.map((empId) => ({
+          taskId: task.id,
+          employeeId: empId,
+          assignedBy: data.actorId,
+        })),
+      });
+    }
+
+    return task;
   }
 
   async update(
@@ -209,10 +268,12 @@ export class TaskRepository {
       estimatedHours?: number | null;
       dueSoonNotifiedAt?: null;
       overdueNotifiedAt?: null;
+      projectId?: string | null;
+      employeeIds?: string[];
       actorId: string;
     }
   ): Promise<Task> {
-    return prisma.task.update({
+    const task = await prisma.task.update({
       where: { id },
       data: {
         ...(data.title !== undefined && { title: data.title }),
@@ -224,9 +285,28 @@ export class TaskRepository {
         ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours }),
         ...(data.dueSoonNotifiedAt !== undefined && { dueSoonNotifiedAt: data.dueSoonNotifiedAt }),
         ...(data.overdueNotifiedAt !== undefined && { overdueNotifiedAt: data.overdueNotifiedAt }),
+        ...(data.projectId !== undefined && { projectId: data.projectId }),
         updatedBy: data.actorId,
       },
     });
+
+    if (data.employeeIds !== undefined) {
+      await prisma.taskAssignment.deleteMany({
+        where: { taskId: id },
+      });
+
+      if (data.employeeIds.length > 0) {
+        await prisma.taskAssignment.createMany({
+          data: data.employeeIds.map((empId) => ({
+            taskId: id,
+            employeeId: empId,
+            assignedBy: data.actorId,
+          })),
+        });
+      }
+    }
+
+    return task;
   }
 
   async softDelete(id: string, actorId: string): Promise<Task> {
@@ -262,13 +342,15 @@ export class TaskRepository {
   // can see at a glance who needs a nudge and who's already late.
   async findDueSoon(withinDays: number): Promise<(Task & {
     assignee: { id: string; name: string; email: string; avatarUrl: string | null } | null;
+    assignees: { id: string; name: string; email: string; avatarUrl: string | null }[];
     assigner: { id: string; name: string; email: string } | null;
+    project: { id: string; name: string; client: string | null } | null;
   })[]> {
     const horizon = new Date();
     horizon.setHours(23, 59, 59, 999);
     horizon.setDate(horizon.getDate() + withinDays);
 
-    return prisma.task.findMany({
+    const tasks = await prisma.task.findMany({
       where: {
         isDeleted: false,
         deletedAt: null,
@@ -277,14 +359,6 @@ export class TaskRepository {
       },
       orderBy: { dueDate: 'asc' },
       include: {
-        assignee: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            avatarUrl: true,
-          },
-        },
         assigner: {
           select: {
             id: true,
@@ -292,7 +366,35 @@ export class TaskRepository {
             email: true,
           },
         },
+        project: {
+          select: {
+            id: true,
+            name: true,
+            client: true,
+          },
+        },
+        assignments: {
+          include: {
+            employee: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
       },
+    });
+
+    return tasks.map((t: any) => {
+      const assignees = (t.assignments ?? []).map((a: any) => a.employee);
+      return {
+        ...t,
+        assignees,
+        assignee: assignees.length > 0 ? assignees[0] : null,
+      };
     }) as any;
   }
 }

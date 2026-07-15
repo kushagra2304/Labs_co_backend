@@ -23,7 +23,10 @@ class AttendanceRepository {
                     minimumWorkingHours: 8.0,
                     maximumWorkingHours: 12.0,
                     autoCheckout: true,
-                    workingDays: '1,2,3,4,5',
+                    // No automatic weekends/Sundays off — every day is a working day
+                    // by default. Time off only happens via the monthly leave quota.
+                    workingDays: '1,2,3,4,5,6,7',
+                    monthlyLeaveQuota: 4,
                 },
             });
         }
@@ -169,6 +172,20 @@ class AttendanceRepository {
     }
     async createAttendance(data) {
         return client_1.default.attendance.create({ data });
+    }
+    // Count how many *paid* leave days a user already has recorded within a
+    // given month — used to enforce the monthly leave quota when approving a
+    // new leave request.
+    async countPaidLeavesInMonth(userId, startOfMonth, endOfMonth) {
+        return client_1.default.attendance.count({
+            where: {
+                userId,
+                status: 'Leave',
+                isPaidLeave: true,
+                date: { gte: startOfMonth, lte: endOfMonth },
+                deletedAt: null,
+            },
+        });
     }
     async updateAttendance(id, data) {
         return client_1.default.attendance.update({

@@ -1,6 +1,7 @@
 import { TaskRepository, TaskFilters, PaginatedTasks } from './task.repository';
 import { UserRepository } from '../helpers/user.repository';
 import { Task, TaskStatus, Priority } from '@prisma/client';
+import prisma from '../prisma/client';
 
 export class TaskService {
   constructor(
@@ -30,24 +31,31 @@ export class TaskService {
     data: {
       title: string;
       description: string;
-      assignedTo: string;
+      assignedTo?: string; // legacy parameter
+      employeeIds: string[];
       priority: string;
       status: string;
       dueDate: string | null;
       estimatedHours?: number | null;
+      projectId?: string | null;
     },
     actorId: string
   ): Promise<Task> {
     await this.validateTaskData(data);
 
+    // Maintain legacy assignedTo field in the DB as the first element of employeeIds
+    const assignedTo = data.employeeIds[0] || '';
+
     return this.taskRepo.create({
       title: data.title.trim(),
       description: data.description.trim(),
-      assignedTo: data.assignedTo,
+      assignedTo,
       priority: data.priority.toLowerCase() as Priority,
       status: data.status.toLowerCase() as TaskStatus,
       dueDate: data.dueDate ? new Date(data.dueDate) : null,
       estimatedHours: data.estimatedHours !== undefined ? data.estimatedHours : null,
+      projectId: data.projectId,
+      employeeIds: data.employeeIds,
       actorId,
     });
   }
@@ -57,11 +65,13 @@ export class TaskService {
     data: {
       title?: string;
       description?: string;
-      assignedTo?: string;
+      assignedTo?: string; // legacy parameter
+      employeeIds?: string[];
       priority?: string;
       status?: string;
       dueDate?: string | null;
       estimatedHours?: number | null;
+      projectId?: string | null;
     },
     actorId: string
   ): Promise<Task> {
@@ -70,22 +80,29 @@ export class TaskService {
       throw new Error('Task not found');
     }
 
-    await this.validateTaskData(data, true);
+    await this.validateTaskData(data, true, existing);
 
     // A due-date change invalidates any previous "due soon" reminder — reset
     // it so the deadline job can notify again if the new date re-enters the
     // reminder window.
     const dueDateChanged = data.dueDate !== undefined;
 
+    // Maintain legacy assignedTo field in the DB as the first element of employeeIds
+    const assignedTo = data.employeeIds !== undefined
+      ? (data.employeeIds[0] || null)
+      : undefined;
+
     return this.taskRepo.update(id, {
       ...(data.title !== undefined && { title: data.title.trim() }),
       ...(data.description !== undefined && { description: data.description.trim() }),
-      ...(data.assignedTo !== undefined && { assignedTo: data.assignedTo }),
+      ...(assignedTo !== undefined && { assignedTo: assignedTo || undefined }),
       ...(data.priority !== undefined && { priority: data.priority.toLowerCase() as Priority }),
       ...(data.status !== undefined && { status: data.status.toLowerCase() as TaskStatus }),
       ...(data.dueDate !== undefined && { dueDate: data.dueDate ? new Date(data.dueDate) : null }),
       ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours }),
       ...(dueDateChanged && { dueSoonNotifiedAt: null, overdueNotifiedAt: null }),
+      ...(data.projectId !== undefined && { projectId: data.projectId }),
+      ...(data.employeeIds !== undefined && { employeeIds: data.employeeIds }),
       actorId,
     });
   }
@@ -120,12 +137,15 @@ export class TaskService {
     data: {
       title?: string;
       description?: string;
-      assignedTo?: string;
+      assignedTo?: string; // legacy parameter
+      employeeIds?: string[];
       priority?: string;
       status?: string;
       dueDate?: string | null;
+      projectId?: string | null;
     },
-    isUpdate = false
+    isUpdate = false,
+    existing: any = null
   ): Promise<void> {
     // Title validation
     if (!isUpdate || data.title !== undefined) {
@@ -141,17 +161,57 @@ export class TaskService {
       }
     }
 
-    // Assignee validation
-    if (!isUpdate || data.assignedTo !== undefined) {
-      if (!data.assignedTo || typeof data.assignedTo !== 'string') {
-        throw new Error('Assignee employee is required');
+    // Employee IDs validation (many-to-many)
+    const targetEmployeeIds = data.employeeIds !== undefined
+      ? data.employeeIds
+      : (isUpdate && existing ? (existing.assignees?.map((a: any) => a.id) || []) : undefined);
+
+    if (!isUpdate || data.employeeIds !== undefined) {
+      if (!data.employeeIds || !Array.isArray(data.employeeIds) || data.employeeIds.length === 0) {
+        throw new Error('At least one assigned employee is required');
       }
-      const employee = await this.userRepo.findById(data.assignedTo);
-      if (!employee) {
-        throw new Error('Assigned employee does not exist');
+
+      for (const employeeId of data.employeeIds) {
+        if (typeof employeeId !== 'string') {
+          throw new Error('Employee ID must be a string');
+        }
+        const employee = await this.userRepo.findById(employeeId);
+        if (!employee) {
+          throw new Error(`Assigned employee with ID ${employeeId} does not exist`);
+        }
+        if (!employee.isActive || employee.deletedAt !== null) {
+          throw new Error(`Assigned employee ${employee.name} must be an active, non-deleted user`);
+        }
       }
-      if (!employee.isActive || employee.deletedAt !== null) {
-        throw new Error('Assigned employee must be an active, non-deleted user');
+    }
+
+    // Project and Member validation
+    const targetProjectId = data.projectId !== undefined ? data.projectId : (isUpdate && existing ? existing.projectId : undefined);
+
+    if (targetProjectId) {
+      // Validate project exists
+      const project = await prisma.project.findFirst({
+        where: { id: targetProjectId, deletedAt: null }
+      });
+      if (!project) {
+        throw new Error('Selected project does not exist');
+      }
+
+      // Validate that EVERY assigned employee belongs to the project
+      if (targetEmployeeIds) {
+        for (const employeeId of targetEmployeeIds) {
+          const isMember = await prisma.projectMember.findFirst({
+            where: {
+              projectId: targetProjectId,
+              userId: employeeId,
+              deletedAt: null,
+            }
+          });
+          if (!isMember) {
+            const employee = await this.userRepo.findById(employeeId);
+            throw new Error(`Assigned employee ${employee?.name || employeeId} is not a member of the selected project`);
+          }
+        }
       }
     }
 

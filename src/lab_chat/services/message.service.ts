@@ -3,6 +3,7 @@ import { ConversationMemberRepository } from '../repositories/conversation-membe
 import { MessageAttachmentRepository } from '../repositories/message-attachment.repository';
 import { MessageReactionRepository } from '../repositories/message-reaction.repository';
 import { MediaService } from './media.service';
+import { ConversationAuthorizationService } from './conversation-authorization.service';
 
 export class MessageService {
   constructor(
@@ -14,8 +15,8 @@ export class MessageService {
   ) {}
 
   async getConversationMessages(conversationId: string, userId: string, page: number, limit: number) {
-    const member = await this.memberRepo.findByConversationAndUser(conversationId, userId);
-    if (!member) {
+    const isAuth = await ConversationAuthorizationService.isAuthorized(conversationId, userId);
+    if (!isAuth) {
       throw new Error('You are not a member of this conversation');
     }
 
@@ -37,8 +38,8 @@ export class MessageService {
       cdnUrl: string;
     }[];
   }) {
-    const member = await this.memberRepo.findByConversationAndUser(data.conversationId, data.senderId);
-    if (!member) {
+    const isAuth = await ConversationAuthorizationService.isAuthorized(data.conversationId, data.senderId);
+    if (!isAuth) {
       throw new Error('Sender is not a member of the conversation');
     }
 
@@ -95,8 +96,8 @@ export class MessageService {
       throw new Error('Message not found');
     }
 
-    const member = await this.memberRepo.findByConversationAndUser(message.conversationId, userId);
-    if (!member) {
+    const isAuth = await ConversationAuthorizationService.isAuthorized(message.conversationId, userId);
+    if (!isAuth) {
       throw new Error('You must be a member of the conversation to react');
     }
 

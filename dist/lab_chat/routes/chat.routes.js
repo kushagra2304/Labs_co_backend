@@ -28,6 +28,7 @@ router.post('/conversations/:conversationId/members', conversationController.add
 router.delete('/conversations/:conversationId/members/:userId', conversationController.removeMember);
 router.post('/conversations/:conversationId/leave', conversationController.leaveGroup);
 // Messages
+router.get('/messages/unread-count', messageController.getUnreadCount);
 router.patch('/messages/:messageId', messageController.editMessage);
 router.delete('/messages/:messageId', messageController.deleteMessage);
 // Reactions

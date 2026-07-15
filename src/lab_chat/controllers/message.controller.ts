@@ -26,6 +26,8 @@ export class MessageController {
           content,
           conversationId,
           updatedAt: message.updatedAt,
+          isEdited: message.isEdited,
+          editedAt: message.editedAt,
         });
 
         // Query members to emit to their personal rooms
@@ -40,6 +42,8 @@ export class MessageController {
             content,
             conversationId,
             updatedAt: message.updatedAt,
+            isEdited: message.isEdited,
+            editedAt: message.editedAt,
           });
         }
       }
@@ -187,6 +191,30 @@ export class MessageController {
         success: false,
         error: error.message || 'Failed to delete reaction',
       });
+    }
+  };
+
+  getUnreadCount = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const unreadCount = await prisma.message.count({
+        where: {
+          senderId: { not: userId },
+          status: { not: 'READ' },
+          deletedAt: null,
+          conversation: {
+            members: {
+              some: {
+                userId,
+                deletedAt: null,
+              },
+            },
+          },
+        },
+      });
+      res.status(200).json({ success: true, count: unreadCount });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message || 'Failed to fetch unread count' });
     }
   };
 }

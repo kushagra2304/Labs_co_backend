@@ -1,6 +1,7 @@
 import { ConversationRepository } from '../repositories/conversation.repository';
 import { UserRepository } from '../../helpers/user.repository';
 import { ConversationMemberRepository } from '../repositories/conversation-member.repository';
+import prisma from '../../prisma/client';
 
 export class ConversationService {
   constructor(
@@ -10,7 +11,26 @@ export class ConversationService {
 
   async getConversations(userId: string, page: number, limit: number) {
     const offset = (page - 1) * limit;
-    return this.conversationRepo.findUserConversations(userId, limit, offset);
+    const conversations = await this.conversationRepo.findUserConversations(userId, limit, offset);
+
+    const conversationsWithUnread = await Promise.all(
+      conversations.map(async (conv) => {
+        const unreadCount = await prisma.message.count({
+          where: {
+            conversationId: conv.id,
+            senderId: { not: userId },
+            status: { not: 'READ' },
+            deletedAt: null,
+          },
+        });
+        return {
+          ...conv,
+          unreadCount,
+        };
+      })
+    );
+
+    return conversationsWithUnread;
   }
 
   async createOrGetDirectConversation(userId: string, targetUserId: string) {

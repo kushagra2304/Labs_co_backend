@@ -10,6 +10,8 @@ const calender_routes_1 = __importDefault(require("./routes/calender.routes"));
 const notification_routes_1 = __importDefault(require("./routes/notification.routes"));
 const task_routes_1 = __importDefault(require("../tasks/task.routes"));
 const employee_task_routes_1 = __importDefault(require("../employee_tasks/employee_task.routes"));
+const task_submission_routes_1 = __importDefault(require("../task_submissions/task_submission.routes"));
+const project_files_routes_1 = __importDefault(require("../project_files/project_files.routes"));
 const team_routes_1 = __importDefault(require("../team/team.routes"));
 const team_settings_routes_1 = __importDefault(require("../team_settings/team_settings.routes"));
 const user_controller_1 = require("./controllers/user.controller");
@@ -22,6 +24,8 @@ router.use('/calendar', calender_routes_1.default);
 router.use('/notifications', notification_routes_1.default);
 router.use('/tasks', task_routes_1.default);
 router.use('/employee/tasks', employee_task_routes_1.default);
+router.use('/task-submissions', task_submission_routes_1.default);
+router.use('/project-files', project_files_routes_1.default);
 router.use('/admin/employees', team_routes_1.default);
 router.use('/settings/team', team_settings_routes_1.default);
 // Only active employees endpoint

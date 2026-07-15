@@ -111,6 +111,8 @@ class MessageRepository {
             data: {
                 content,
                 updatedBy: actorId,
+                isEdited: true,
+                editedAt: new Date(),
             },
             include: {
                 sender: true,

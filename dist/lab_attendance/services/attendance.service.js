@@ -23,7 +23,7 @@ class AttendanceService {
         const allowed = [
             'officeStartTime', 'officeEndTime', 'gracePeriod', 'lateMinutes',
             'halfDayRules', 'minimumWorkingHours', 'maximumWorkingHours',
-            'overtimeRules', 'autoCheckout', 'workingDays',
+            'overtimeRules', 'autoCheckout', 'workingDays', 'monthlyLeaveQuota',
         ];
         for (const key of allowed) {
             if (key in data)
@@ -308,6 +308,7 @@ class AttendanceService {
         if (!data.date || !data.reason) {
             throw new Error('Date and Reason are required.');
         }
+        const requestType = data.requestType === 'LEAVE' ? 'LEAVE' : 'REMOTE';
         const requestDate = new Date(data.date);
         // Verify if attendance already exists
         const existingAttendance = await this.repo.findTodayAttendance(userId, data.date);
@@ -320,24 +321,26 @@ class AttendanceService {
             reason: data.reason,
             notes: data.notes || null,
             status: 'pending',
+            requestType,
             createdBy: userId,
         });
         // Notify admins
+        const label = requestType === 'LEAVE' ? 'a leave' : 'remote attendance';
         const admins = await client_1.default.user.findMany({
             where: { role: 'admin', isActive: true, deletedAt: null },
         });
         for (const admin of admins) {
             await this.repo.createNotification({
                 user: { connect: { id: admin.id } },
-                title: 'New Manual Attendance Request',
-                message: `An employee has requested manual attendance for ${data.date}.`,
+                title: 'New Attendance Request',
+                message: `An employee has requested ${label} for ${data.date}.`,
                 type: 'new_attendance_request',
             });
         }
         await this.repo.createAuditLog({
             user: userId ? { connect: { id: userId } } : undefined,
             action: 'SUBMIT_MANUAL_REQUEST',
-            details: `Submitted manual request for ${data.date}. Reason: ${data.reason}`,
+            details: `Submitted ${requestType} request for ${data.date}. Reason: ${data.reason}`,
         });
         return request;
     }
@@ -364,47 +367,74 @@ class AttendanceService {
             updatedBy: adminId,
         });
         // Handle attendance creation/update if approved
+        let isPaidLeave;
         if (status === 'approved') {
             const dateStr = request.date.toISOString().split('T')[0];
             const existingAttendance = await this.repo.findTodayAttendance(request.userId, dateStr);
-            const policy = await this.repo.getPolicy();
-            const [startHour, startMin] = policy.officeStartTime.split(':').map(Number);
-            const [endHour, endMin] = policy.officeEndTime.split(':').map(Number);
-            const mockCheckIn = new Date(request.date);
-            mockCheckIn.setHours(startHour, startMin, 0, 0);
-            const mockCheckOut = new Date(request.date);
-            mockCheckOut.setHours(endHour, endMin, 0, 0);
-            const workingHours = policy.minimumWorkingHours;
-            if (existingAttendance) {
-                await this.repo.updateAttendance(existingAttendance.id, {
-                    status: 'Present',
-                    source: 'Manual Approval',
-                    checkIn: mockCheckIn,
-                    checkOut: mockCheckOut,
-                    workingHours: new client_2.Prisma.Decimal(workingHours),
+            const requestType = request.requestType === 'LEAVE' ? 'LEAVE' : 'REMOTE';
+            if (requestType === 'LEAVE') {
+                // Leave days don't have a check-in/check-out — they're a day off,
+                // just one that counts against (or beyond) the monthly quota.
+                const policy = await this.repo.getPolicy();
+                const monthStart = new Date(request.date.getFullYear(), request.date.getMonth(), 1);
+                const monthEnd = new Date(request.date.getFullYear(), request.date.getMonth() + 1, 0, 23, 59, 59);
+                const paidLeavesSoFar = await this.repo.countPaidLeavesInMonth(request.userId, monthStart, monthEnd);
+                isPaidLeave = paidLeavesSoFar < policy.monthlyLeaveQuota;
+                const leaveData = {
+                    status: 'Leave',
+                    source: 'Leave Approval',
+                    checkIn: null,
+                    checkOut: null,
+                    workingHours: null,
+                    isPaidLeave,
                     adminRemarks,
-                    updatedBy: adminId,
-                });
+                };
+                if (existingAttendance) {
+                    await this.repo.updateAttendance(existingAttendance.id, { ...leaveData, updatedBy: adminId });
+                }
+                else {
+                    await this.repo.createAttendance({
+                        user: { connect: { id: request.userId } },
+                        date: request.date,
+                        ...leaveData,
+                        createdBy: adminId,
+                    });
+                }
             }
             else {
-                await this.repo.createAttendance({
-                    user: { connect: { id: request.userId } },
-                    date: request.date,
-                    status: 'Present',
-                    source: 'Manual Approval',
-                    checkIn: mockCheckIn,
-                    checkOut: mockCheckOut,
-                    workingHours: new client_2.Prisma.Decimal(workingHours),
-                    adminRemarks,
-                    createdBy: adminId,
-                });
+                // Remote attendance — the employee worked, just not from an approved
+                // office WiFi network. No check-in/check-out time range is shown for
+                // these days, just the "Remote" status itself.
+                if (existingAttendance) {
+                    await this.repo.updateAttendance(existingAttendance.id, {
+                        status: 'Remote',
+                        source: 'Remote Approval',
+                        checkIn: null,
+                        checkOut: null,
+                        workingHours: null,
+                        adminRemarks,
+                        updatedBy: adminId,
+                    });
+                }
+                else {
+                    await this.repo.createAttendance({
+                        user: { connect: { id: request.userId } },
+                        date: request.date,
+                        status: 'Remote',
+                        source: 'Remote Approval',
+                        adminRemarks,
+                        createdBy: adminId,
+                    });
+                }
             }
         }
         // Send notifications
+        const requestTypeLabel = request.requestType === 'LEAVE' ? 'leave' : 'remote attendance';
+        const unpaidNote = status === 'approved' && isPaidLeave === false ? ' (this exceeds your monthly leave quota, so it is unpaid)' : '';
         await this.repo.createNotification({
             user: { connect: { id: request.userId } },
             title: status === 'approved' ? 'Attendance Request Approved' : 'Attendance Request Rejected',
-            message: `Your manual attendance request for ${request.date.toISOString().split('T')[0]} has been ${status}. Remarks: ${adminRemarks || 'None'}`,
+            message: `Your ${requestTypeLabel} request for ${request.date.toISOString().split('T')[0]} has been ${status}${unpaidNote}. Remarks: ${adminRemarks || 'None'}`,
             type: status === 'approved' ? 'attendance_approved' : 'attendance_rejected',
         });
         await this.repo.createAuditLog({
@@ -436,11 +466,13 @@ class AttendanceService {
         let absentDays = 0;
         let lateDays = 0;
         let leaves = 0;
+        let paidLeavesUsed = 0;
+        let unpaidLeaves = 0;
         let totalWorkingHours = 0;
         let totalOvertime = 0;
         // Filter statuses
         monthlyRecords.forEach((r) => {
-            if (r.status === 'Present' || r.status === 'Late' || r.status === 'Half Day') {
+            if (r.status === 'Present' || r.status === 'Late' || r.status === 'Half Day' || r.status === 'Remote') {
                 presentDays++;
             }
             if (r.status === 'Late') {
@@ -451,6 +483,12 @@ class AttendanceService {
             }
             if (r.status === 'Leave') {
                 leaves++;
+                if (r.isPaidLeave === false) {
+                    unpaidLeaves++;
+                }
+                else {
+                    paidLeavesUsed++;
+                }
             }
             if (r.workingHours) {
                 totalWorkingHours += Number(r.workingHours);
@@ -488,6 +526,10 @@ class AttendanceService {
             absentDays,
             lateDays,
             leaves,
+            leaveQuota: policy.monthlyLeaveQuota,
+            paidLeavesUsed,
+            leavesRemaining: Math.max(0, policy.monthlyLeaveQuota - paidLeavesUsed),
+            unpaidLeaves,
             workingHours: Number(totalWorkingHours.toFixed(2)),
             overtime: Number(totalOvertime.toFixed(2)),
             attendancePercentage,
@@ -501,7 +543,7 @@ class AttendanceService {
             return { currentStreak: 0, longestStreak: 0 };
         }
         const attendanceDates = new Set(records
-            .filter((r) => ['Present', 'Late', 'Half Day', 'Manual Approval'].includes(r.status) || (r.checkIn && r.status !== 'Absent'))
+            .filter((r) => ['Present', 'Late', 'Half Day', 'Manual Approval', 'Remote'].includes(r.status) || (r.checkIn && r.status !== 'Absent'))
             .map((r) => r.date.toDateString()));
         let currentStreak = 0;
         let longestStreak = 0;

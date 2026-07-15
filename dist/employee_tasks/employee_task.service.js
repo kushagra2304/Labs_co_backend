@@ -85,6 +85,17 @@ class EmployeeTaskService {
         if (task.assignedTo !== employeeId && task.createdBy !== employeeId) {
             throw new Error('Unauthorized: You are not authorized to update this task status');
         }
+        // Admin-assigned tasks are gated behind acknowledgment, and completion for
+        // them must go through the file-review submission flow rather than this
+        // generic status setter. Personal tasks are untouched by either rule.
+        if (task.taskType === client_1.TaskType.ADMIN_ASSIGNED) {
+            if (!task.acknowledgedAt) {
+                throw new Error('Task must be acknowledged before it can be started or updated');
+            }
+            if (status.toLowerCase() === 'completed') {
+                throw new Error('Use the completion submission endpoint with a file attachment to complete this task');
+            }
+        }
         const validStatuses = ['pending', 'in_progress', 'on_hold', 'completed'];
         if (!validStatuses.includes(status.toLowerCase())) {
             throw new Error(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
@@ -142,6 +153,76 @@ class EmployeeTaskService {
                 }
             }
         }
+    }
+    // ── Acknowledgment gate ─────────────────────────────────────────────────
+    async acknowledgeTask(id, employeeId) {
+        const task = await this.employeeTaskRepo.findById(id);
+        if (!task) {
+            throw new Error('Task not found');
+        }
+        if (task.assignedTo !== employeeId) {
+            throw new Error('Unauthorized: You are not authorized to acknowledge this task');
+        }
+        if (task.taskType !== client_1.TaskType.ADMIN_ASSIGNED) {
+            throw new Error('Only admin-assigned tasks require acknowledgment');
+        }
+        if (task.acknowledgedAt) {
+            // Already acknowledged — idempotent no-op so double clicks don't error.
+            return task;
+        }
+        const updated = await this.employeeTaskRepo.acknowledge(id);
+        await this.employeeTaskRepo.createProgressUpdate(id, employeeId, 'Task acknowledged.');
+        return updated;
+    }
+    async getPendingAcknowledgment(employeeId) {
+        return this.employeeTaskRepo.findPendingAcknowledgment(employeeId);
+    }
+    // Own tasks due within the next few days (default 3), or already overdue,
+    // that aren't completed yet — feeds the "Due / Overdue" reminder tab.
+    async getDueSoonTasks(employeeId, withinDays = 3) {
+        return this.employeeTaskRepo.findDueSoon(employeeId, withinDays);
+    }
+    // ── Completion submission (file review workflow) ────────────────────────
+    async submitCompletion(id, employeeId, file, note) {
+        const task = await this.employeeTaskRepo.findById(id);
+        if (!task) {
+            throw new Error('Task not found');
+        }
+        if (task.assignedTo !== employeeId) {
+            throw new Error('Unauthorized: You are not authorized to submit this task');
+        }
+        if (task.taskType !== client_1.TaskType.ADMIN_ASSIGNED) {
+            throw new Error('Personal tasks do not require a completion submission');
+        }
+        if (!task.acknowledgedAt) {
+            throw new Error('Task must be acknowledged before it can be completed');
+        }
+        const latest = await this.employeeTaskRepo.getLatestSubmission(id);
+        if (latest && latest.status === 'pending') {
+            throw new Error('A submission is already awaiting admin review for this task');
+        }
+        const fileRecord = await this.employeeTaskRepo.createCompletionFile({
+            taskId: id,
+            uploadedBy: employeeId,
+            name: file.fileName,
+            fileUrl: file.fileUrl,
+            fileType: file.fileType,
+            sizeKb: file.sizeKb,
+        });
+        const submission = await this.employeeTaskRepo.createSubmission({
+            taskId: id,
+            submittedBy: employeeId,
+            fileId: fileRecord.id,
+            note,
+        });
+        // Task is marked completed by the employee's declaration; it stays
+        // "completed" even if this particular file later gets declined — the
+        // admin reviews the file separately and finalizes the task separately.
+        await this.employeeTaskRepo.markCompleted(id);
+        await this.employeeTaskRepo.createProgressUpdate(id, employeeId, latest
+            ? 'Resubmitted a completion file for admin review.'
+            : 'Marked completed and submitted a file for admin review.');
+        return submission;
     }
 }
 exports.EmployeeTaskService = EmployeeTaskService;

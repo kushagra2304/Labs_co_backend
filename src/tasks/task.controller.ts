@@ -76,7 +76,7 @@ export class TaskController {
   createTask = async (req: Request, res: Response): Promise<void> => {
     try {
       const actorId = req.user!.id;
-      const { title, description, assignedTo, priority, status, dueDate, estimatedHours } = req.body;
+      const { title, description, assignedTo, employeeIds, priority, status, dueDate, estimatedHours, projectId } = req.body;
 
       const parsedHours = estimatedHours !== undefined && estimatedHours !== null && estimatedHours !== ''
         ? Number(estimatedHours)
@@ -90,24 +90,29 @@ export class TaskController {
         return;
       }
 
+      const resolvedEmployeeIds = Array.isArray(employeeIds)
+        ? employeeIds
+        : (assignedTo ? [assignedTo] : []);
+
       const task = await this.taskService.createTask(
         {
           title,
           description,
-          assignedTo,
+          employeeIds: resolvedEmployeeIds,
           priority,
           status,
           dueDate,
           estimatedHours: parsedHours,
+          projectId: projectId || null,
         },
         actorId
       );
 
-      // Admin-assigned tasks need the employee to acknowledge them before
+      // Admin-assigned tasks need the employees to acknowledge them before
       // work can start — surface that via the notification bell.
-      if (task.assignedTo) {
+      for (const empId of resolvedEmployeeIds) {
         await publishActivity({
-          userId: task.assignedTo,
+          userId: empId,
           type: 'task_ack_required',
           title: 'New task assigned',
           body: `"${task.title}" was assigned to you and needs your acknowledgment before you can start.`,
@@ -133,7 +138,7 @@ export class TaskController {
     try {
       const id = String(req.params.id);
       const actorId = req.user!.id;
-      const { title, description, assignedTo, priority, status, dueDate, estimatedHours } = req.body;
+      const { title, description, assignedTo, employeeIds, priority, status, dueDate, estimatedHours, projectId } = req.body;
 
       const parsedHours = estimatedHours !== undefined && estimatedHours !== null && estimatedHours !== ''
         ? Number(estimatedHours)
@@ -147,16 +152,21 @@ export class TaskController {
         return;
       }
 
+      const resolvedEmployeeIds = employeeIds !== undefined
+        ? (Array.isArray(employeeIds) ? employeeIds : (assignedTo ? [assignedTo] : []))
+        : (assignedTo !== undefined ? [assignedTo] : undefined);
+
       const task = await this.taskService.updateTask(
         id,
         {
           title,
           description,
-          assignedTo,
+          employeeIds: resolvedEmployeeIds,
           priority,
           status,
           dueDate,
           estimatedHours: parsedHours,
+          projectId: projectId !== undefined ? (projectId || null) : undefined,
         },
         actorId
       );

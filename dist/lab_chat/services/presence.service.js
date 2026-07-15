@@ -8,6 +8,7 @@ const redis_config_1 = __importDefault(require("../../config/redis.config"));
 const user_repository_1 = require("../../helpers/user.repository");
 class PresenceService {
     userRepo;
+    activeSockets = new Map();
     constructor(userRepo = new user_repository_1.UserRepository()) {
         this.userRepo = userRepo;
     }
@@ -17,19 +18,27 @@ class PresenceService {
     getTypingKey(conversationId, userId) {
         return `typing:${conversationId}:${userId}`;
     }
-    async setUserOnline(userId) {
-        const key = this.getPresenceKey(userId);
-        const exists = await redis_config_1.default.exists(key);
-        await redis_config_1.default.set(key, 'online', 'EX', 35);
-        try {
-            await this.userRepo.update(userId, {
-                lastSeen: new Date(),
-            });
+    async setUserOnline(userId, socketId) {
+        if (!this.activeSockets.has(userId)) {
+            this.activeSockets.set(userId, new Set());
         }
-        catch (err) {
-            console.error(`Failed to update user status in DB: ${userId}`, err);
+        const sockets = this.activeSockets.get(userId);
+        const wasOffline = sockets.size === 0;
+        sockets.add(socketId);
+        if (wasOffline) {
+            const key = this.getPresenceKey(userId);
+            await redis_config_1.default.set(key, 'online', 'EX', 35);
+            try {
+                await this.userRepo.update(userId, {
+                    lastSeen: new Date(),
+                });
+            }
+            catch (err) {
+                console.error(`Failed to update user status in DB: ${userId}`, err);
+            }
+            return true;
         }
-        return exists === 0;
+        return false;
     }
     async heartbeat(userId) {
         const key = this.getPresenceKey(userId);
@@ -43,18 +52,26 @@ class PresenceService {
             console.error(`Failed to update user lastSeen: ${userId}`, err);
         }
     }
-    async setUserOffline(userId) {
-        const key = this.getPresenceKey(userId);
-        const deleted = await redis_config_1.default.del(key);
-        try {
-            await this.userRepo.update(userId, {
-                lastSeen: new Date(),
-            });
+    async setUserOffline(userId, socketId) {
+        const sockets = this.activeSockets.get(userId);
+        if (!sockets)
+            return false;
+        sockets.delete(socketId);
+        if (sockets.size === 0) {
+            this.activeSockets.delete(userId);
+            const key = this.getPresenceKey(userId);
+            await redis_config_1.default.del(key);
+            try {
+                await this.userRepo.update(userId, {
+                    lastSeen: new Date(),
+                });
+            }
+            catch (err) {
+                console.error(`Failed to update user status in DB: ${userId}`, err);
+            }
+            return true;
         }
-        catch (err) {
-            console.error(`Failed to update user status in DB: ${userId}`, err);
-        }
-        return deleted > 0;
+        return false;
     }
     async isUserOnline(userId) {
         const key = this.getPresenceKey(userId);

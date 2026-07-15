@@ -5,23 +5,16 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TaskRepository = void 0;
 const client_1 = __importDefault(require("../prisma/client"));
+const client_2 = require("@prisma/client");
 class TaskRepository {
     async findById(id) {
-        return client_1.default.task.findFirst({
+        const task = await client_1.default.task.findFirst({
             where: {
                 id,
                 isDeleted: false,
                 deletedAt: null,
             },
             include: {
-                assignee: {
-                    select: {
-                        id: true,
-                        name: true,
-                        email: true,
-                        avatarUrl: true,
-                    },
-                },
                 assigner: {
                     select: {
                         id: true,
@@ -29,8 +22,35 @@ class TaskRepository {
                         email: true,
                     },
                 },
+                project: {
+                    select: {
+                        id: true,
+                        name: true,
+                        client: true,
+                    },
+                },
+                assignments: {
+                    include: {
+                        employee: {
+                            select: {
+                                id: true,
+                                name: true,
+                                email: true,
+                                avatarUrl: true,
+                            },
+                        },
+                    },
+                },
             },
         });
+        if (!task)
+            return null;
+        const assignees = (task.assignments ?? []).map((a) => a.employee);
+        return {
+            ...task,
+            assignees,
+            assignee: assignees.length > 0 ? assignees[0] : null,
+        };
     }
     async findAll(filters) {
         const page = filters.page || 1;
@@ -111,19 +131,30 @@ class TaskRepository {
                 skip,
                 take: limit,
                 include: {
-                    assignee: {
-                        select: {
-                            id: true,
-                            name: true,
-                            email: true,
-                            avatarUrl: true,
-                        },
-                    },
                     assigner: {
                         select: {
                             id: true,
                             name: true,
                             email: true,
+                        },
+                    },
+                    project: {
+                        select: {
+                            id: true,
+                            name: true,
+                            client: true,
+                        },
+                    },
+                    assignments: {
+                        include: {
+                            employee: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    email: true,
+                                    avatarUrl: true,
+                                },
+                            },
                         },
                     },
                 },
@@ -132,15 +163,23 @@ class TaskRepository {
                 where: whereClause,
             }),
         ]);
+        const mappedTasks = tasks.map((t) => {
+            const assignees = (t.assignments ?? []).map((a) => a.employee);
+            return {
+                ...t,
+                assignees,
+                assignee: assignees.length > 0 ? assignees[0] : null,
+            };
+        });
         return {
-            tasks: tasks,
+            tasks: mappedTasks,
             total,
             page,
             limit,
         };
     }
     async create(data) {
-        return client_1.default.task.create({
+        const task = await client_1.default.task.create({
             data: {
                 title: data.title,
                 description: data.description,
@@ -149,13 +188,24 @@ class TaskRepository {
                 status: data.status,
                 dueDate: data.dueDate,
                 estimatedHours: data.estimatedHours,
+                projectId: data.projectId,
                 assignedBy: data.actorId,
                 createdBy: data.actorId,
             },
         });
+        if (data.employeeIds && data.employeeIds.length > 0) {
+            await client_1.default.taskAssignment.createMany({
+                data: data.employeeIds.map((empId) => ({
+                    taskId: task.id,
+                    employeeId: empId,
+                    assignedBy: data.actorId,
+                })),
+            });
+        }
+        return task;
     }
     async update(id, data) {
-        return client_1.default.task.update({
+        const task = await client_1.default.task.update({
             where: { id },
             data: {
                 ...(data.title !== undefined && { title: data.title }),
@@ -165,9 +215,27 @@ class TaskRepository {
                 ...(data.status !== undefined && { status: data.status }),
                 ...(data.dueDate !== undefined && { dueDate: data.dueDate }),
                 ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours }),
+                ...(data.dueSoonNotifiedAt !== undefined && { dueSoonNotifiedAt: data.dueSoonNotifiedAt }),
+                ...(data.overdueNotifiedAt !== undefined && { overdueNotifiedAt: data.overdueNotifiedAt }),
+                ...(data.projectId !== undefined && { projectId: data.projectId }),
                 updatedBy: data.actorId,
             },
         });
+        if (data.employeeIds !== undefined) {
+            await client_1.default.taskAssignment.deleteMany({
+                where: { taskId: id },
+            });
+            if (data.employeeIds.length > 0) {
+                await client_1.default.taskAssignment.createMany({
+                    data: data.employeeIds.map((empId) => ({
+                        taskId: id,
+                        employeeId: empId,
+                        assignedBy: data.actorId,
+                    })),
+                });
+            }
+        }
+        return task;
     }
     async softDelete(id, actorId) {
         return client_1.default.task.update({
@@ -177,6 +245,74 @@ class TaskRepository {
                 deletedAt: new Date(),
                 deletedBy: actorId,
             },
+        });
+    }
+    async getLatestSubmission(taskId) {
+        return client_1.default.taskSubmission.findFirst({
+            where: { taskId, deletedAt: null },
+            orderBy: { createdAt: 'desc' },
+        });
+    }
+    async finalize(id, adminId) {
+        return client_1.default.task.update({
+            where: { id },
+            data: {
+                adminVerifiedAt: new Date(),
+                adminVerifiedBy: adminId,
+            },
+        });
+    }
+    // Tasks due within the next few days, or already past their due date, that
+    // aren't finished yet — surfaced on the admin "Due / Overdue" tab so admins
+    // can see at a glance who needs a nudge and who's already late.
+    async findDueSoon(withinDays) {
+        const horizon = new Date();
+        horizon.setHours(23, 59, 59, 999);
+        horizon.setDate(horizon.getDate() + withinDays);
+        const tasks = await client_1.default.task.findMany({
+            where: {
+                isDeleted: false,
+                deletedAt: null,
+                status: { notIn: [client_2.TaskStatus.completed] },
+                dueDate: { not: null, lte: horizon },
+            },
+            orderBy: { dueDate: 'asc' },
+            include: {
+                assigner: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true,
+                    },
+                },
+                project: {
+                    select: {
+                        id: true,
+                        name: true,
+                        client: true,
+                    },
+                },
+                assignments: {
+                    include: {
+                        employee: {
+                            select: {
+                                id: true,
+                                name: true,
+                                email: true,
+                                avatarUrl: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        return tasks.map((t) => {
+            const assignees = (t.assignments ?? []).map((a) => a.employee);
+            return {
+                ...t,
+                assignees,
+                assignee: assignees.length > 0 ? assignees[0] : null,
+            };
         });
     }
 }

@@ -1,8 +1,12 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TaskService = void 0;
 const task_repository_1 = require("./task.repository");
 const user_repository_1 = require("../helpers/user.repository");
+const client_1 = __importDefault(require("../prisma/client"));
 class TaskService {
     taskRepo;
     userRepo;
@@ -20,16 +24,25 @@ class TaskService {
         }
         return task;
     }
+    // Tasks due within the next few days (default 3), or already overdue,
+    // that aren't completed yet — feeds the admin "Due / Overdue" tab.
+    async getDueSoonTasks(withinDays = 3) {
+        return this.taskRepo.findDueSoon(withinDays);
+    }
     async createTask(data, actorId) {
         await this.validateTaskData(data);
+        // Maintain legacy assignedTo field in the DB as the first element of employeeIds
+        const assignedTo = data.employeeIds[0] || '';
         return this.taskRepo.create({
             title: data.title.trim(),
             description: data.description.trim(),
-            assignedTo: data.assignedTo,
+            assignedTo,
             priority: data.priority.toLowerCase(),
             status: data.status.toLowerCase(),
             dueDate: data.dueDate ? new Date(data.dueDate) : null,
             estimatedHours: data.estimatedHours !== undefined ? data.estimatedHours : null,
+            projectId: data.projectId,
+            employeeIds: data.employeeIds,
             actorId,
         });
     }
@@ -38,15 +51,26 @@ class TaskService {
         if (!existing) {
             throw new Error('Task not found');
         }
-        await this.validateTaskData(data, true);
+        await this.validateTaskData(data, true, existing);
+        // A due-date change invalidates any previous "due soon" reminder — reset
+        // it so the deadline job can notify again if the new date re-enters the
+        // reminder window.
+        const dueDateChanged = data.dueDate !== undefined;
+        // Maintain legacy assignedTo field in the DB as the first element of employeeIds
+        const assignedTo = data.employeeIds !== undefined
+            ? (data.employeeIds[0] || null)
+            : undefined;
         return this.taskRepo.update(id, {
             ...(data.title !== undefined && { title: data.title.trim() }),
             ...(data.description !== undefined && { description: data.description.trim() }),
-            ...(data.assignedTo !== undefined && { assignedTo: data.assignedTo }),
+            ...(assignedTo !== undefined && { assignedTo: assignedTo || undefined }),
             ...(data.priority !== undefined && { priority: data.priority.toLowerCase() }),
             ...(data.status !== undefined && { status: data.status.toLowerCase() }),
             ...(data.dueDate !== undefined && { dueDate: data.dueDate ? new Date(data.dueDate) : null }),
             ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours }),
+            ...(dueDateChanged && { dueSoonNotifiedAt: null, overdueNotifiedAt: null }),
+            ...(data.projectId !== undefined && { projectId: data.projectId }),
+            ...(data.employeeIds !== undefined && { employeeIds: data.employeeIds }),
             actorId,
         });
     }
@@ -57,7 +81,24 @@ class TaskService {
         }
         return this.taskRepo.softDelete(id, actorId);
     }
-    async validateTaskData(data, isUpdate = false) {
+    // Final admin sign-off. Deliberately separate from the employee marking a
+    // task "completed" and from a submitted file being accepted: an accepted
+    // file does not by itself close out the task, the admin must finalize it.
+    async finalizeTask(id, adminId) {
+        const task = await this.taskRepo.findById(id);
+        if (!task) {
+            throw new Error('Task not found');
+        }
+        if (task.adminVerifiedAt) {
+            throw new Error('Task is already finalized');
+        }
+        const latestSubmission = await this.taskRepo.getLatestSubmission(id);
+        if (!latestSubmission || latestSubmission.status !== 'accepted') {
+            throw new Error('Task can only be finalized after its submitted file has been accepted');
+        }
+        return this.taskRepo.finalize(id, adminId);
+    }
+    async validateTaskData(data, isUpdate = false, existing = null) {
         // Title validation
         if (!isUpdate || data.title !== undefined) {
             if (!data.title || typeof data.title !== 'string' || !data.title.trim()) {
@@ -70,17 +111,52 @@ class TaskService {
                 throw new Error('Task description is required');
             }
         }
-        // Assignee validation
-        if (!isUpdate || data.assignedTo !== undefined) {
-            if (!data.assignedTo || typeof data.assignedTo !== 'string') {
-                throw new Error('Assignee employee is required');
+        // Employee IDs validation (many-to-many)
+        const targetEmployeeIds = data.employeeIds !== undefined
+            ? data.employeeIds
+            : (isUpdate && existing ? (existing.assignees?.map((a) => a.id) || []) : undefined);
+        if (!isUpdate || data.employeeIds !== undefined) {
+            if (!data.employeeIds || !Array.isArray(data.employeeIds) || data.employeeIds.length === 0) {
+                throw new Error('At least one assigned employee is required');
             }
-            const employee = await this.userRepo.findById(data.assignedTo);
-            if (!employee) {
-                throw new Error('Assigned employee does not exist');
+            for (const employeeId of data.employeeIds) {
+                if (typeof employeeId !== 'string') {
+                    throw new Error('Employee ID must be a string');
+                }
+                const employee = await this.userRepo.findById(employeeId);
+                if (!employee) {
+                    throw new Error(`Assigned employee with ID ${employeeId} does not exist`);
+                }
+                if (!employee.isActive || employee.deletedAt !== null) {
+                    throw new Error(`Assigned employee ${employee.name} must be an active, non-deleted user`);
+                }
             }
-            if (!employee.isActive || employee.deletedAt !== null) {
-                throw new Error('Assigned employee must be an active, non-deleted user');
+        }
+        // Project and Member validation
+        const targetProjectId = data.projectId !== undefined ? data.projectId : (isUpdate && existing ? existing.projectId : undefined);
+        if (targetProjectId) {
+            // Validate project exists
+            const project = await client_1.default.project.findFirst({
+                where: { id: targetProjectId, deletedAt: null }
+            });
+            if (!project) {
+                throw new Error('Selected project does not exist');
+            }
+            // Validate that EVERY assigned employee belongs to the project
+            if (targetEmployeeIds) {
+                for (const employeeId of targetEmployeeIds) {
+                    const isMember = await client_1.default.projectMember.findFirst({
+                        where: {
+                            projectId: targetProjectId,
+                            userId: employeeId,
+                            deletedAt: null,
+                        }
+                    });
+                    if (!isMember) {
+                        const employee = await this.userRepo.findById(employeeId);
+                        throw new Error(`Assigned employee ${employee?.name || employeeId} is not a member of the selected project`);
+                    }
+                }
             }
         }
         // Priority validation

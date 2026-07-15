@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DashboardController = void 0;
 const client_1 = __importDefault(require("../../prisma/client"));
+const client_2 = require("@prisma/client");
 const notification_helper_1 = require("../../helpers/notification.helper");
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const ACTION_TO_ACTIVITY_TYPE = {
@@ -29,13 +30,19 @@ class DashboardController {
         const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
         const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
         const where = { deletedAt: null };
-        const [total, completed, thisMonthTotal, lastMonthTotal, thisMonthCompleted, lastMonthCompleted] = await Promise.all([
+        const [total, completed, thisMonthTotal, lastMonthTotal, thisMonthCompleted, lastMonthCompleted, thisMonthPending, lastMonthPending,] = await Promise.all([
             client_1.default.project.count({ where }),
             client_1.default.project.count({ where: { ...where, status: "completed" } }),
             client_1.default.project.count({ where: { ...where, createdAt: { gte: startOfThisMonth } } }),
             client_1.default.project.count({ where: { ...where, createdAt: { gte: startOfLastMonth, lt: startOfThisMonth } } }),
             client_1.default.project.count({ where: { ...where, status: "completed", updatedAt: { gte: startOfThisMonth } } }),
             client_1.default.project.count({ where: { ...where, status: "completed", updatedAt: { gte: startOfLastMonth, lt: startOfThisMonth } } }),
+            // Pending = created this/last month and still not completed — mirrors
+            // the totalProjects comparison above (new-per-month), just scoped to
+            // the not-yet-completed subset so the trend is meaningful instead of
+            // comparing `pending` against itself (which always produced 0%).
+            client_1.default.project.count({ where: { ...where, status: { not: "completed" }, createdAt: { gte: startOfThisMonth } } }),
+            client_1.default.project.count({ where: { ...where, status: { not: "completed" }, createdAt: { gte: startOfLastMonth, lt: startOfThisMonth } } }),
         ]);
         const pending = total - completed;
         const pctChange = (curr, prev) => prev === 0 ? (curr > 0 ? 100 : 0) : Math.round(((curr - prev) / prev) * 100);
@@ -45,7 +52,7 @@ class DashboardController {
             completed,
             completedChangePct: pctChange(thisMonthCompleted, lastMonthCompleted),
             pending,
-            pendingChangePct: pctChange(pending, total - completed),
+            pendingChangePct: pctChange(thisMonthPending, lastMonthPending),
         });
     };
     getPerformanceChart = async (req, res) => {
@@ -109,8 +116,11 @@ class DashboardController {
                 client_1.default.file.count({
                     where: { deletedAt: null, uploadedBy: userId, createdAt: { gte: startOfToday } }
                 }),
+                // "Pending acknowledgment" now tracks the real acknowledgedAt gate
+                // (admin-assigned tasks only) rather than the legacy "pending" status,
+                // since a task can sit in status "pending" after being acknowledged too.
                 client_1.default.task.count({
-                    where: { deletedAt: null, assignedTo: userId, status: 'pending' }
+                    where: { deletedAt: null, assignedTo: userId, taskType: client_2.TaskType.ADMIN_ASSIGNED, acknowledgedAt: null }
                 })
             ]);
             res.json({
@@ -236,28 +246,75 @@ class DashboardController {
             return;
         }
     };
+    // Real points/rank/badges — replaces the old version of this endpoint which
+    // just auto-seeded 3 fake demo rows on first call ("Runner-up Jun" etc. were
+    // literal hardcoded strings, not earned). Everything below is derived from
+    // actual task/file activity; nothing is fabricated. The `Reward` table
+    // itself is left in place as a hook for a future admin "give a reward"
+    // feature — it's just no longer auto-populated with fake rows.
     getEmployeeRewards = async (req, res) => {
         try {
             const userId = req.user.id;
-            let rewards = await client_1.default.reward.findMany({
-                where: { employeeId: userId },
-                orderBy: { createdAt: 'desc' }
+            const now = new Date();
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+            const monthLabel = now.toLocaleDateString("en-US", { month: "short" });
+            const POINTS_PER_TASK = 100;
+            const [completedTasks, completedThisMonth, uploadsThisMonth] = await Promise.all([
+                client_1.default.task.count({ where: { deletedAt: null, assignedTo: userId, status: 'completed' } }),
+                client_1.default.task.count({ where: { deletedAt: null, assignedTo: userId, status: 'completed', completedAt: { gte: startOfMonth } } }),
+                client_1.default.file.count({ where: { deletedAt: null, uploadedBy: userId, createdAt: { gte: startOfMonth } } }),
+            ]);
+            // Rank this month among real employees, ranked by tasks completed this
+            // month (a fair, comparable metric — raw points is just this * 100).
+            const employees = await client_1.default.user.findMany({
+                where: { role: 'employee', deletedAt: null, isActive: true },
+                select: { id: true },
             });
-            // If no rewards, seed initial ones for demo/wow factor!
-            if (rewards.length === 0) {
-                await client_1.default.reward.createMany({
-                    data: [
-                        { employeeId: userId, type: 'badge', message: 'Runner-up Jun', createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) },
-                        { employeeId: userId, type: 'star', message: 'Fast May', createdAt: new Date(Date.now() - 35 * 24 * 60 * 60 * 1000) },
-                        { employeeId: userId, type: 'appreciation', message: 'Uploader Apr', createdAt: new Date(Date.now() - 65 * 24 * 60 * 60 * 1000) }
-                    ]
-                });
-                rewards = await client_1.default.reward.findMany({
-                    where: { employeeId: userId },
-                    orderBy: { createdAt: 'desc' }
-                });
-            }
-            res.json(rewards);
+            const monthlyCompletions = await Promise.all(employees.map((e) => client_1.default.task.count({
+                where: { deletedAt: null, assignedTo: e.id, status: 'completed', completedAt: { gte: startOfMonth } },
+            }).then((count) => ({ id: e.id, count }))));
+            monthlyCompletions.sort((a, b) => b.count - a.count);
+            const rank = monthlyCompletions.findIndex((e) => e.id === userId) + 1 || monthlyCompletions.length + 1;
+            const totalEmployees = employees.length;
+            // "Fast Finisher" = completed a task at least a day ahead of its due
+            // date, this month — a real per-task check (completedAt vs dueDate).
+            const fastFinishTasks = await client_1.default.task.findMany({
+                where: {
+                    deletedAt: null,
+                    assignedTo: userId,
+                    status: 'completed',
+                    completedAt: { gte: startOfMonth },
+                    dueDate: { not: null },
+                },
+                select: { completedAt: true, dueDate: true },
+            });
+            const fastFinishCount = fastFinishTasks.filter((t) => t.completedAt && t.dueDate && t.completedAt.getTime() <= t.dueDate.getTime() - 24 * 60 * 60 * 1000).length;
+            const points = completedTasks * POINTS_PER_TASK;
+            const monthlyPoints = completedThisMonth * POINTS_PER_TASK;
+            const targetPoints = 1500;
+            const badges = [
+                {
+                    id: 'rank',
+                    label: rank === 1 ? `Top Performer ${monthLabel}` : rank === 2 ? `Runner-up ${monthLabel}` : `Rank #${rank} ${monthLabel}`,
+                    achieved: rank <= 2 && totalEmployees > 1,
+                },
+                {
+                    id: 'speed',
+                    label: `Fast Finisher ${monthLabel}`,
+                    achieved: fastFinishCount > 0,
+                },
+                {
+                    id: 'uploader',
+                    label: `Uploader ${monthLabel}`,
+                    achieved: uploadsThisMonth >= 5,
+                },
+                {
+                    id: 'consistency',
+                    label: `On a Roll ${monthLabel}`,
+                    achieved: completedThisMonth >= 3,
+                },
+            ];
+            res.json({ points, monthlyPoints, targetPoints, rank, totalEmployees, badges });
             return;
         }
         catch (error) {
